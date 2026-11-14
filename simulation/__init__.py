@@ -2,17 +2,19 @@
 simulation — Simulated Hardware for Windows Development
 ========================================================
 Drop-in replacements for the hardware/ drivers that work on
-Windows (or any non-Pi platform). They implement the same
-abstract interfaces (BaseMicrophone, BaseSpeaker, etc.) so the
-rest of the codebase doesn't need to know whether it's running
-on real hardware or not.
+Windows (or any non-Pi platform).  They implement the same
+abstract interfaces so the rest of the codebase stays
+platform-independent.
+
+These are instantiated automatically by
+hardware.factory.HardwareFactory when not running on a Pi.
 
 Modules
 -------
-- sim_mic.py     : Simulated microphone (reads from WAV files or system mic)
-- sim_speaker.py : Simulated speaker (plays via Windows audio)
-- sim_button.py  : Simulated button (keyboard key press)
-- sim_led.py     : Simulated LED (console / terminal output)
-- sim_display.py : Simulated display (console text output)
-- sim_camera.py  : Simulated camera (webcam or static test image)
+- sim_microphone.py : Simulated mic (system mic via PyAudio, or silence)
+- sim_speaker.py    : Simulated speaker (PyAudio / winsound / log-only)
+- sim_button.py     : Simulated button (keyboard Enter / programmatic)
+- sim_display.py    : Simulated display (console / emoji output)
+- sim_camera.py     : Simulated camera (webcam or static placeholder)
+- sim_led.py        : Simulated LED (console / emoji output)
 """

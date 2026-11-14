@@ -1,56 +1,108 @@
 """
-simulation.sim_button — Simulated Button
-==========================================
-Replaces the GPIO button on Windows for development.
-Listens for a keyboard key press (e.g., spacebar) instead of a
-physical button.
+simulation.sim_button — Simulated Push-to-Talk Button
+=======================================================
+Drop-in replacement for PiButton on Windows / dev machines.
 
-Implements hardware.button.BaseButton interface.
+Provides three ways to trigger the button:
+  1. Programmatic: call simulate_press() / simulate_release()
+     (ideal for automated tests and pipeline integration).
+  2. Interactive: wait_for_press() prompts via input() in the
+     terminal — press Enter to simulate a button press.
+  3. Keyboard: if the `keyboard` library is installed, listens
+     for the spacebar as a push-to-talk key (optional).
+
+Implements hardware.button.ButtonInterface.
 """
 
 import logging
+import threading
 from typing import Callable, Optional
-from hardware.button import BaseButton
+
+from hardware.button import ButtonInterface
 
 logger = logging.getLogger(__name__)
 
 
-class SimButton(BaseButton):
+class SimButton(ButtonInterface):
     """
-    Simulated push-button using keyboard input.
+    Simulated push-to-talk button for Windows development.
 
-    TODO: Implement with a keyboard listener (e.g., `keyboard` library
-          or `input()` prompt) for interactive dev testing.
+    No Raspberry Pi GPIO libraries required.
     """
 
     def __init__(self):
         self._pressed = False
         self._press_cb: Optional[Callable] = None
         self._release_cb: Optional[Callable] = None
-        logger.info("SimButton initialised (use keyboard to simulate).")
+        self._press_event = threading.Event()
+        logger.info("SimButton: initialised (keyboard / programmatic trigger).")
+
+    # ── Interface implementation ──────────────────────────────
 
     def is_pressed(self) -> bool:
         return self._pressed
 
-    def on_press(self, callback: Callable) -> None:
+    def on_press(self, callback: Callable[[], None]) -> None:
         self._press_cb = callback
         logger.info("SimButton: press callback registered.")
 
-    def on_release(self, callback: Callable) -> None:
+    def on_release(self, callback: Callable[[], None]) -> None:
         self._release_cb = callback
         logger.info("SimButton: release callback registered.")
 
+    def wait_for_press(self, timeout: float | None = None) -> bool:
+        """
+        Block until the button is pressed.
+
+        In interactive mode (terminal), prompts the user to press Enter.
+        In test mode, waits for simulate_press() from another thread.
+        """
+        self._press_event.clear()
+
+        # Start a background thread that waits for Enter key
+        input_thread = threading.Thread(
+            target=self._input_listener, daemon=True
+        )
+        input_thread.start()
+
+        pressed = self._press_event.wait(timeout=timeout)
+        if pressed:
+            logger.info("SimButton: press detected.")
+        else:
+            logger.info("SimButton: wait timed out.")
+        return pressed
+
+    def _input_listener(self):
+        """Listen for Enter key in the terminal."""
+        try:
+            input("  [SimButton] Press ENTER to simulate button press → ")
+            self.simulate_press()
+        except (EOFError, OSError):
+            # Not running in an interactive terminal (CI / pytest / test)
+            pass
+
+    # ── Programmatic triggers (for tests / pipeline) ──────────
+
     def simulate_press(self) -> None:
-        """Call this from a keyboard listener or test."""
+        """Simulate a button press event."""
         self._pressed = True
+        self._press_event.set()
+        logger.debug("SimButton: PRESSED (simulated)")
         if self._press_cb:
             self._press_cb()
 
     def simulate_release(self) -> None:
-        """Call this from a keyboard listener or test."""
+        """Simulate a button release event."""
         self._pressed = False
+        self._press_event.clear()
+        logger.debug("SimButton: RELEASED (simulated)")
         if self._release_cb:
             self._release_cb()
 
+    # ── Cleanup ───────────────────────────────────────────────
+
     def cleanup(self) -> None:
+        self._pressed = False
+        self._press_cb = None
+        self._release_cb = None
         logger.info("SimButton: cleaned up.")

@@ -1,72 +1,55 @@
 """
-hardware.camera — Camera Driver
-==================================
-Controls a camera module attached to the Raspberry Pi for visual
-input — image capture, QR/barcode scanning, and (future) basic
-vision tasks.
+hardware.camera — Camera Interface & Pi Implementation
+========================================================
+Defines the CameraInterface ABC and the PiCamera driver.
 
-Supports:
-  - Raspberry Pi Camera Module v1/v2 (CSI)
-  - USB webcams (via V4L2)
+The camera is fully OPTIONAL and never activates automatically.
+It provides an interface for future image-capture features
+(e.g., QR scanning, scene description via vision LLM).
 
-On the Pi this uses `picamera2` (the official Pi camera library)
-or OpenCV with V4L2 backend.  On Windows the simulation layer
-substitutes this module.
-
-NOTE: The Pi Zero W's single-core CPU and 512 MB RAM limit
-      real-time video processing.  Use the camera for still
-      captures and lightweight frame analysis only.
+Pi-specific dependencies (lazy-imported):
+  - picamera2   (official Raspberry Pi camera library)
 """
 
+import logging
 from abc import ABC, abstractmethod
-from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
-class BaseCamera(ABC):
-    """Interface that both real and simulated cameras implement."""
+# ── Interface ──────────────────────────────────────────────────
+
+class CameraInterface(ABC):
+    """
+    Abstract camera interface.
+
+    The camera is optional — the system must work without one.
+    Implementations must NOT activate the camera on __init__;
+    only capture_image() triggers the hardware.
+    """
 
     @abstractmethod
-    def init(self) -> None:
-        """Initialise the camera hardware."""
+    def is_available(self) -> bool:
+        """Return True if a camera is detected and usable."""
         ...
 
     @abstractmethod
     def capture_image(self, filepath: str) -> str:
         """
-        Capture a still image and save to filepath.
+        Capture a single still image and save it.
+
+        This is the ONLY method that activates the camera hardware.
+
+        Parameters
+        ----------
+        filepath : str
+            Destination file path for the image.
 
         Returns
         -------
         str
-            The path to the saved image file.
+            The path to the saved image, or empty string on failure.
         """
-        ...
-
-    @abstractmethod
-    def capture_frame(self) -> bytes:
-        """
-        Capture a single frame as raw bytes (JPEG or RGB).
-
-        Returns
-        -------
-        bytes
-            Raw image data.
-        """
-        ...
-
-    @abstractmethod
-    def get_resolution(self) -> tuple:
-        """Return the current capture resolution as (width, height)."""
-        ...
-
-    @abstractmethod
-    def set_resolution(self, width: int, height: int) -> None:
-        """Set the capture resolution."""
-        ...
-
-    @abstractmethod
-    def is_available(self) -> bool:
-        """Return True if a camera is detected and usable."""
         ...
 
     @abstractmethod
@@ -75,52 +58,61 @@ class BaseCamera(ABC):
         ...
 
 
-class Camera(BaseCamera):
+# ── Raspberry Pi Implementation ───────────────────────────────
+
+class PiCamera(CameraInterface):
     """
-    Real camera driver for Raspberry Pi.
+    Real camera driver for Raspberry Pi Camera Module (CSI).
 
-    Targets:
-      - Pi Camera Module v1 (5 MP, CSI)
-      - Pi Camera Module v2 (8 MP, CSI)
-      - USB webcam (V4L2)
+    The camera is NOT activated during __init__.  It is only
+    powered on when capture_image() is called, and powered off
+    immediately after capture to save power and RAM.
 
-    Dependencies (Pi only):
-      - picamera2   (official Pi camera library)
-      - opencv-python-headless  (lightweight, no GUI)
-
-    TODO: Implement when deploying on the Pi.
+    Parameters
+    ----------
+    width : int
+        Capture width (default 640 — low res for Pi Zero W).
+    height : int
+        Capture height (default 480).
     """
 
-    # Recommended resolutions for Pi Zero W (low CPU)
-    RES_LOW = (320, 240)       # Fast, minimal CPU
-    RES_MEDIUM = (640, 480)    # Balanced
-    RES_HIGH = (1280, 720)     # Stills only — too slow for real-time
-
-    def __init__(self, width: int = 640, height: int = 480,
-                 source: str = "csi"):
+    def __init__(self, width: int = 640, height: int = 480):
         self.width = width
         self.height = height
-        self.source = source    # "csi" (Pi camera) or "usb"
-        self._device = None
-
-    def init(self) -> None:
-        raise NotImplementedError("Real camera driver not yet implemented.")
-
-    def capture_image(self, filepath: str) -> str:
-        raise NotImplementedError
-
-    def capture_frame(self) -> bytes:
-        raise NotImplementedError
-
-    def get_resolution(self) -> tuple:
-        return (self.width, self.height)
-
-    def set_resolution(self, width: int, height: int) -> None:
-        self.width = width
-        self.height = height
+        self._camera = None  # Never opened in __init__
 
     def is_available(self) -> bool:
-        raise NotImplementedError
+        """Check if picamera2 is importable and a camera is present."""
+        try:
+            from picamera2 import Picamera2
+            cam = Picamera2()
+            cam.close()
+            return True
+        except Exception:
+            return False
+
+    def capture_image(self, filepath: str) -> str:
+        try:
+            from picamera2 import Picamera2
+
+            cam = Picamera2()
+            config = cam.create_still_configuration(
+                main={"size": (self.width, self.height)}
+            )
+            cam.configure(config)
+            cam.start()
+            cam.capture_file(filepath)
+            cam.stop()
+            cam.close()
+            logger.info(f"PiCamera: image saved to {filepath}")
+            return filepath
+        except ImportError:
+            logger.error("PiCamera: picamera2 not installed.")
+            return ""
+        except Exception as e:
+            logger.error(f"PiCamera capture failed: {e}")
+            return ""
 
     def cleanup(self) -> None:
-        raise NotImplementedError
+        # No persistent resources — camera is opened/closed per capture
+        logger.info("PiCamera: cleaned up.")

@@ -1,31 +1,77 @@
 """
-hardware.display — Display Driver
-====================================
-Controls a small display attached to the VIHAAN AI PIN.
-Supports OLED (SSD1306 / SH1106) or e-ink displays connected
-via I2C or SPI to the Raspberry Pi.
+hardware.display — Display Interface & Pi Implementation
+==========================================================
+Defines the DisplayInterface ABC and the PiDisplay driver for an
+optional SPI TFT display (e.g., ST7735 1.8″ 128×160) on the
+Raspberry Pi Zero W.
 
-Used to show:
-  - Device status (listening, thinking, speaking)
-  - Transcribed text / assistant response
-  - Battery level, Wi-Fi signal
-  - Time / notifications
+The display is entirely OPTIONAL.  If no display hardware is
+present or the driver fails to initialise, the system continues
+without it.
 
-On the Pi this uses lightweight libraries like `luma.oled` or
-`Pillow` for rendering.  On Windows the simulation layer
-substitutes this module.
+Status modes:
+  IDLE, LISTENING, THINKING, SPEAKING, ERROR
+
+Pi-specific dependencies (lazy-imported):
+  - spidev, Pillow, or ST7735 library
 """
 
+import logging
 from abc import ABC, abstractmethod
-from typing import Optional
+from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
-class BaseDisplay(ABC):
-    """Interface that both real and simulated displays implement."""
+class DisplayStatus(Enum):
+    """Standard device status labels shown on the display."""
+    IDLE = "IDLE"
+    LISTENING = "LISTENING"
+    THINKING = "THINKING"
+    SPEAKING = "SPEAKING"
+    ERROR = "ERROR"
+
+
+# ── Interface ──────────────────────────────────────────────────
+
+class DisplayInterface(ABC):
+    """
+    Abstract display interface.
+
+    All display implementations (real and simulated) must implement
+    this interface.  The display is always optional — the system
+    must work without one.
+    """
 
     @abstractmethod
     def init(self) -> None:
         """Initialise the display hardware / connection."""
+        ...
+
+    @abstractmethod
+    def show_text(self, text: str, line: int = 0) -> None:
+        """
+        Display a line of text.
+
+        Parameters
+        ----------
+        text : str
+            Text to display.
+        line : int
+            Line number (0 = top).
+        """
+        ...
+
+    @abstractmethod
+    def show_status(self, status: DisplayStatus) -> None:
+        """
+        Show a device status indicator.
+
+        Parameters
+        ----------
+        status : DisplayStatus
+            One of IDLE, LISTENING, THINKING, SPEAKING, ERROR.
+        """
         ...
 
     @abstractmethod
@@ -34,34 +80,15 @@ class BaseDisplay(ABC):
         ...
 
     @abstractmethod
-    def show_text(self, text: str, x: int = 0, y: int = 0,
-                  font_size: int = 12) -> None:
-        """Render a text string at the given position."""
-        ...
+    def set_brightness(self, level: int) -> None:
+        """
+        Set display brightness (0–255).
 
-    @abstractmethod
-    def show_status(self, status: str) -> None:
-        """Show a device status label (e.g., 'Listening…')."""
-        ...
-
-    @abstractmethod
-    def show_battery(self, percentage: int) -> None:
-        """Show battery level indicator."""
-        ...
-
-    @abstractmethod
-    def brightness(self, level: int) -> None:
-        """Set display brightness (0–255)."""
-        ...
-
-    @abstractmethod
-    def sleep(self) -> None:
-        """Put the display into low-power sleep mode."""
-        ...
-
-    @abstractmethod
-    def wake(self) -> None:
-        """Wake the display from sleep mode."""
+        Parameters
+        ----------
+        level : int
+            Brightness value, 0 = off, 255 = max.
+        """
         ...
 
     @abstractmethod
@@ -70,60 +97,89 @@ class BaseDisplay(ABC):
         ...
 
 
-class Display(BaseDisplay):
+# ── Raspberry Pi Implementation ───────────────────────────────
+
+class PiDisplay(DisplayInterface):
     """
-    Real display driver for Raspberry Pi.
+    Real display driver for an SPI TFT display on Raspberry Pi.
 
-    Targets:
-      - SSD1306 128×64 OLED (I2C) — most common, ~\$3
-      - SH1106  128×64 OLED (I2C/SPI)
-      - Waveshare e-ink (SPI) — for ultra-low-power use
+    Targets ST7735 128×160 or similar small SPI TFT displays.
+    Uses the Pillow library to render text onto a framebuffer image
+    and push it to the display via SPI.
 
-    Dependencies (Pi only):
-      - luma.oled  (for OLED)
-      - luma.core  (rendering framework)
-      - Pillow     (image/text rendering)
+    This is a STUB — the full rendering pipeline will be
+    implemented when the display hardware is available.
 
-    TODO: Implement when deploying on the Pi.
+    Parameters
+    ----------
+    width : int
+        Display width in pixels (default 128).
+    height : int
+        Display height in pixels (default 160).
+    spi_port : int
+        SPI bus number (default 0).
+    spi_cs : int
+        SPI chip-select line (default 0).
+    gpio_dc : int
+        GPIO pin for data/command select (default 25).
+    gpio_rst : int
+        GPIO pin for reset (default 24).
     """
 
-    # Common OLED resolutions
-    OLED_128x64 = (128, 64)
-    OLED_128x32 = (128, 32)
+    # Status → short label mapping for small screens
+    STATUS_LABELS = {
+        DisplayStatus.IDLE:      "● READY",
+        DisplayStatus.LISTENING: "🎤 LISTENING",
+        DisplayStatus.THINKING:  "⏳ THINKING",
+        DisplayStatus.SPEAKING:  "🔊 SPEAKING",
+        DisplayStatus.ERROR:     "⚠ ERROR",
+    }
 
-    def __init__(self, width: int = 128, height: int = 64,
-                 interface: str = "i2c", i2c_address: int = 0x3C):
+    def __init__(self, width: int = 128, height: int = 160,
+                 spi_port: int = 0, spi_cs: int = 0,
+                 gpio_dc: int = 25, gpio_rst: int = 24):
         self.width = width
         self.height = height
-        self.interface = interface      # "i2c" or "spi"
-        self.i2c_address = i2c_address
+        self.spi_port = spi_port
+        self.spi_cs = spi_cs
+        self.gpio_dc = gpio_dc
+        self.gpio_rst = gpio_rst
         self._device = None
-        self._is_sleeping = False
+        self._current_status: DisplayStatus = DisplayStatus.IDLE
 
     def init(self) -> None:
-        raise NotImplementedError("Real display driver not yet implemented.")
+        logger.info(
+            f"PiDisplay: SPI TFT {self.width}×{self.height} "
+            f"(SPI{self.spi_port}.{self.spi_cs}) — stub, not yet wired."
+        )
+        # TODO: Initialise SPI device and Pillow framebuffer
+        # from ST7735 import ST7735
+        # self._device = ST7735(port=self.spi_port, cs=self.spi_cs, ...)
+
+    def show_text(self, text: str, line: int = 0) -> None:
+        logger.info(f"PiDisplay [{line}]: {text}")
+        # TODO: Render text onto framebuffer with Pillow and push to SPI
+
+    def show_status(self, status: DisplayStatus) -> None:
+        self._current_status = status
+        label = self.STATUS_LABELS.get(status, status.value)
+        logger.info(f"PiDisplay status: {label}")
+        # TODO: Render centred status label on display
 
     def clear(self) -> None:
-        raise NotImplementedError
+        logger.debug("PiDisplay: cleared.")
+        # TODO: Fill framebuffer with black and push
 
-    def show_text(self, text: str, x: int = 0, y: int = 0,
-                  font_size: int = 12) -> None:
-        raise NotImplementedError
-
-    def show_status(self, status: str) -> None:
-        raise NotImplementedError
-
-    def show_battery(self, percentage: int) -> None:
-        raise NotImplementedError
-
-    def brightness(self, level: int) -> None:
-        raise NotImplementedError
-
-    def sleep(self) -> None:
-        raise NotImplementedError
-
-    def wake(self) -> None:
-        raise NotImplementedError
+    def set_brightness(self, level: int) -> None:
+        level = max(0, min(255, level))
+        logger.debug(f"PiDisplay: brightness → {level}")
+        # TODO: PWM backlight control via GPIO
 
     def cleanup(self) -> None:
-        raise NotImplementedError
+        if self._device:
+            try:
+                self.clear()
+            except Exception:
+                pass
+        self._device = None
+        logger.info("PiDisplay: cleaned up.")

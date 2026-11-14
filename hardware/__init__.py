@@ -3,20 +3,21 @@ hardware — Hardware Abstraction Layer
 ======================================
 Drivers for physical peripherals on the Raspberry Pi Zero W.
 
-Each module exposes a base class (interface) and a concrete
-implementation that wraps Pi-specific libraries (RPi.GPIO, gpiozero).
+Each module defines an abstract interface (ABC) and a concrete
+Pi implementation.  The simulation/ package provides drop-in
+replacements for development on non-Pi platforms.
 
-These modules are NEVER imported directly on Windows.
-The simulation/ package provides drop-in replacements for
-development on non-Pi platforms.
+Use hardware.factory.HardwareFactory.create() to get the correct
+implementations for the current platform.
 
 Modules
 -------
-- mic.py      : Microphone input (I2S / USB mic)
-- speaker.py  : Audio output (I2S DAC / 3.5 mm / Bluetooth)
-- button.py   : Physical push-button via GPIO
-- led.py      : Status LED(s) via GPIO
-- battery.py  : Battery voltage reading via ADC (SPI)
-- display.py  : OLED / e-ink display (I2C / SPI)
-- camera.py   : Camera module (CSI / USB)
+- microphone.py : Microphone input (INMP441 I2S)
+- speaker.py    : Audio output (MAX98357A I2S amplifier)
+- button.py     : Push-to-talk button (GPIO17)
+- display.py    : Optional SPI TFT display
+- camera.py     : Optional camera (CSI / USB)
+- led.py        : Status LED(s) via GPIO
+- battery.py    : Battery voltage reading via ADC (SPI)
+- factory.py    : Hardware factory — dependency injection
 """
