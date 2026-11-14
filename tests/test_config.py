@@ -12,9 +12,10 @@ def test_default_settings():
     """Settings should have sensible defaults without any .env file."""
     s = Settings()
     assert s.PROJECT_NAME == "VIHAAN AI PIN"
-    assert s.VERSION == "0.1.0"
     assert s.LOG_LEVEL == "INFO"
-    assert s.LLM_PROVIDER == "gemini"
+    assert s.LLM_MODEL == "openai/gpt-oss-120b"
+    assert s.STT_MODEL == "whisper-large-v3-turbo"
+    assert s.ESPEAK_EXECUTABLE == "espeak-ng"
     assert s.AUDIO_SAMPLE_RATE == 16000
     assert s.MAX_MEMORY_MB == 384
 

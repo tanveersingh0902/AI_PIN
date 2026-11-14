@@ -10,14 +10,13 @@
 # ── Core ──────────────────────────────────────────────────────
 python-dotenv>=1.0.0          # .env file loading
 
-# ── AI / LLM (cloud-based to save Pi RAM) ────────────────────
-google-genai>=1.0.0           # Gemini API (lightweight SDK)
-# openai>=1.0.0               # Uncomment if using OpenAI
+# ── AI — Groq Cloud API (STT + LLM) ──────────────────────────
+groq>=0.11.0                  # Official Groq SDK (Whisper STT + LLM)
 
-# ── Speech ────────────────────────────────────────────────────
-SpeechRecognition>=3.10.0     # STT — wraps Google / Vosk / etc.
-pyttsx3>=2.90                 # TTS — offline, lightweight
-# vosk>=0.3.45                # Uncomment for offline STT on Pi
+# ── TTS ───────────────────────────────────────────────────────
+# espeak-ng is a SYSTEM executable, NOT a pip package.
+#   Windows : https://github.com/espeak-ng/espeak-ng/releases
+#   Pi      : sudo apt install espeak-ng
 
 # ── Audio ─────────────────────────────────────────────────────
 PyAudio>=0.2.13               # Microphone / speaker I/O
@@ -25,9 +24,6 @@ sounddevice>=0.4.6            # Alternative audio backend
 
 # ── Networking ────────────────────────────────────────────────
 requests>=2.31.0              # HTTP client (lightweight)
-
-# ── Utilities ─────────────────────────────────────────────────
-# (none yet — add as needed)
 
 # ── Testing ───────────────────────────────────────────────────
 pytest>=7.4.0                 # Unit testing

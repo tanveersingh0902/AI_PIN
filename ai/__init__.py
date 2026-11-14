@@ -2,15 +2,21 @@
 ai — Artificial Intelligence Layer
 ====================================
 Handles speech recognition (STT), text-to-speech (TTS), large language
-model (LLM) interaction, and wake-word detection.
+model (LLM) interaction, conversation management, and the AI pipeline.
 
-All AI modules use cloud APIs by default to keep the Pi's RAM free.
-Offline alternatives (Vosk, pyttsx3) are available for disconnected use.
+All heavy AI processing uses Groq's cloud API to keep the Pi's RAM free.
+TTS runs locally via eSpeak NG.
 
 Modules
 -------
-- stt.py        : Speech-to-Text engine
-- tts.py        : Text-to-Speech engine
-- llm.py        : LLM / chatbot interaction (Gemini / OpenAI)
-- wake_word.py  : Wake-word ("Hey Vihaan") detection
+- speech_to_text.py : Groq Whisper STT (cloud)
+- llm.py            : Groq LLM chat completion (cloud)
+- text_to_speech.py : eSpeak NG TTS (local subprocess)
+- conversation.py   : Conversation history manager
+- pipeline.py       : AI pipeline orchestrator (STT → LLM → TTS)
+- wake_word.py      : Wake-word ("Hey Vihaan") detection (future)
+
+Legacy stubs (from Step 1, superseded):
+- stt.py            : Superseded by speech_to_text.py
+- tts.py            : Superseded by text_to_speech.py
 """

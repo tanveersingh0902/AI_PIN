@@ -4,6 +4,7 @@
 
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-Raspberry%20Pi%20Zero%20W-green.svg)](https://www.raspberrypi.org/)
+[![Tests](https://img.shields.io/badge/Tests-99%20passing-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/License-Private-red.svg)]()
 
 ---
@@ -16,67 +17,102 @@ VIHAAN AI PIN is a compact, wearable AI voice assistant designed to run on a **R
 
 ---
 
+## 🧠 AI Architecture (Step 3)
+
+| Component | Technology | Runs on |
+|---|---|---|
+| **Speech-to-Text** | Groq Whisper `whisper-large-v3-turbo` | ☁️ Cloud |
+| **Language Model** | Groq `openai/gpt-oss-120b` | ☁️ Cloud |
+| **Text-to-Speech** | `espeak-ng` (local executable) | 💻 Device |
+
+### Pipeline Flow
+
+```
+🎤 Microphone → Audio file
+                    ↓
+         Groq Whisper STT (cloud)
+                    ↓
+            Transcribed text
+                    ↓
+         Groq LLM (cloud)
+                    ↓
+           Generated response
+                    ↓
+         eSpeak NG TTS (local)
+                    ↓
+               🔊 Speaker
+```
+
+### Internet Requirements
+
+| Component | Internet Required? |
+|---|---|
+| Speech-to-Text (Groq Whisper) | ✅ Yes |
+| LLM (Groq) | ✅ Yes |
+| Text-to-Speech (eSpeak NG) | ❌ No — runs locally |
+| Hardware (mic, speaker, button) | ❌ No |
+
+---
+
 ## 🏗️ Project Structure
 
 ```
 AI_PIN/
-├── main.py                  # Entry point — launches the assistant
-├── config.py                # Central configuration (env vars + defaults)
-├── requirements.txt         # Python dependencies
-├── .env.example             # Template for secrets / settings
-├── .gitignore               # Git exclusions
-├── README.md                # This file
+├── main.py                      # Entry point — launches the assistant
+├── config.py                    # Central configuration (env vars + defaults)
+├── requirements.txt             # Python dependencies
+├── .env.example                 # Template for secrets / settings
+├── .gitignore                   # Git exclusions
+├── README.md                    # This file
 │
-├── hardware/                # 🔧 Real hardware drivers (Pi only)
-│   ├── __init__.py
-│   ├── mic.py               #    Microphone input (I2S / USB)
-│   ├── speaker.py           #    Audio output (I2S DAC / 3.5mm)
-│   ├── button.py            #    Physical push-button (GPIO)
-│   ├── led.py               #    Status LED (GPIO)
-│   └── battery.py           #    Battery voltage monitor (SPI ADC)
+├── hardware/                    # 🔧 Hardware abstraction (Pi drivers)
+│   ├── microphone.py            #    INMP441 I2S microphone
+│   ├── speaker.py               #    MAX98357A I2S amplifier
+│   ├── button.py                #    GPIO17 push-to-talk button
+│   ├── display.py               #    Optional SPI TFT display
+│   ├── camera.py                #    Optional camera (CSI/USB)
+│   └── factory.py               #    Hardware factory (DI)
 │
-├── ai/                      # 🧠 AI / ML layer
-│   ├── __init__.py
-│   ├── stt.py               #    Speech-to-Text engine
-│   ├── tts.py               #    Text-to-Speech engine
-│   ├── llm.py               #    LLM client (Gemini / OpenAI)
-│   └── wake_word.py         #    Wake-word detection
+├── ai/                          # 🧠 AI pipeline
+│   ├── speech_to_text.py        #    Groq Whisper STT
+│   ├── llm.py                   #    Groq LLM client
+│   ├── text_to_speech.py        #    eSpeak NG TTS
+│   ├── conversation.py          #    Conversation history manager
+│   ├── pipeline.py              #    AI pipeline orchestrator
+│   └── wake_word.py             #    Wake-word detection (future)
 │
-├── network/                 # 🌐 Connectivity
-│   ├── __init__.py
-│   ├── wifi.py              #    Wi-Fi status & management
-│   ├── bluetooth.py         #    Bluetooth (future)
-│   └── api_client.py        #    Shared HTTP client with retries
+├── simulation/                  # 🖥️ Simulated hardware (Windows dev)
+│   ├── sim_microphone.py        #    Simulated mic
+│   ├── sim_speaker.py           #    Simulated speaker
+│   ├── sim_button.py            #    Simulated button
+│   └── sim_display.py           #    Simulated display
 │
-├── backend/                 # ⚙️ Application logic
-│   ├── __init__.py
-│   ├── pipeline.py          #    Voice assistant loop (listen→think→speak)
-│   ├── state.py             #    Device state machine
-│   └── session.py           #    Conversation history / memory
+├── backend/                     # ⚙️ Application logic
+│   ├── pipeline.py              #    Voice assistant loop
+│   ├── state.py                 #    Device state machine
+│   └── session.py               #    Session manager
 │
-├── simulation/              # 🖥️ Simulated hardware (Windows dev)
-│   ├── __init__.py
-│   ├── sim_mic.py           #    Simulated microphone
-│   ├── sim_speaker.py       #    Simulated speaker
-│   ├── sim_button.py        #    Simulated button (keyboard)
-│   └── sim_led.py           #    Simulated LED (console output)
+├── network/                     # 🌐 Connectivity
+│   ├── wifi.py                  #    Wi-Fi management
+│   ├── bluetooth.py             #    Bluetooth (future)
+│   └── api_client.py            #    Shared HTTP client
 │
-├── utils/                   # 🛠️ Shared utilities
-│   ├── __init__.py
-│   ├── logger.py            #    Logging setup (console + file)
-│   ├── platform_detect.py   #    Detect Windows vs Pi at runtime
-│   └── helpers.py           #    Misc helper functions
+├── utils/                       # 🛠️ Shared utilities
+│   ├── logger.py                #    Logging setup
+│   ├── platform_detect.py       #    OS detection
+│   └── helpers.py               #    Helper functions
 │
-├── data/                    # 📁 Runtime data (gitignored contents)
-│   ├── logs/                #    Application log files
-│   ├── cache/               #    Temporary cache
-│   └── models/              #    Offline AI models (if any)
+├── data/                        # 📁 Runtime data
+│   ├── logs/                    #    Log files
+│   ├── cache/                   #    Temporary cache
+│   └── models/                  #    Offline models (if any)
 │
-└── tests/                   # 🧪 Test suite
-    ├── __init__.py
-    ├── test_config.py       #    Configuration tests
-    ├── test_platform.py     #    Platform detection tests
-    └── test_pipeline.py     #    Pipeline & state machine tests
+└── tests/                       # 🧪 Test suite (99 tests)
+    ├── test_ai.py               #    AI pipeline tests (mocked)
+    ├── test_hardware.py         #    Hardware abstraction tests
+    ├── test_config.py           #    Configuration tests
+    ├── test_pipeline.py         #    Backend pipeline tests
+    └── test_platform.py         #    Platform detection tests
 ```
 
 ---
@@ -86,31 +122,52 @@ AI_PIN/
 ### 1. Clone & Setup
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/tanveersingh0902/AI_PIN.git
 cd AI_PIN
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
+### 2. Configure API Key
 
 ```bash
 copy .env.example .env
-# Edit .env with your API keys
 ```
 
-### 3. Run
+Edit `.env` and set your Groq API key:
+
+```
+GROQ_API_KEY=gsk_your_actual_groq_api_key_here
+```
+
+Get a free key at: https://console.groq.com/keys
+
+### 3. Install eSpeak NG (optional for dev)
+
+eSpeak NG is a **system executable**, not a pip package.
+
+**Windows:**
+Download from https://github.com/espeak-ng/espeak-ng/releases and install. The installer adds it to PATH.
+
+**Raspberry Pi:**
+```bash
+sudo apt install espeak-ng
+```
+
+### 4. Run
 
 ```bash
 python main.py
 ```
 
-### 4. Test
+### 5. Test
 
 ```bash
 pytest tests/ -v
 ```
+
+All 99 tests run **without internet, API keys, or hardware**.
 
 ---
 
@@ -120,23 +177,27 @@ pytest tests/ -v
 
 - Raspberry Pi Zero W with Raspberry Pi OS Lite (32-bit)
 - Python 3.9+
-- I2S microphone (e.g., INMP441)
-- Speaker / DAC (e.g., MAX98357A)
-- Push button + LED on GPIO
+- INMP441 I2S microphone
+- MAX98357A I2S amplifier + speaker
+- Push-to-talk button on GPIO17
 
 ### Install
 
 ```bash
-# On the Pi:
-sudo apt update && sudo apt install -y python3-pip python3-venv
-git clone <your-repo-url>
+sudo apt update && sudo apt install -y python3-pip python3-venv espeak-ng
+git clone https://github.com/tanveersingh0902/AI_PIN.git
 cd AI_PIN
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+pip install RPi.GPIO gpiozero  # Pi-specific
+```
 
-# Install Pi-specific dependencies:
-pip install RPi.GPIO gpiozero spidev
+### Configure
+
+```bash
+cp .env.example .env
+nano .env  # Set GROQ_API_KEY
 ```
 
 ### Run
@@ -151,28 +212,26 @@ python3 main.py
 
 | Principle | How It's Applied |
 |---|---|
-| **Hardware Isolation** | `hardware/` is never imported on Windows; `simulation/` provides drop-in replacements |
-| **Lightweight by Default** | Cloud APIs for heavy AI; pyttsx3/espeak for offline TTS |
-| **Memory-Conscious** | 384 MB soft cap; capped conversation history; response size limits |
-| **Cross-Platform** | `platform_detect.py` auto-selects real vs simulated drivers |
-| **Modular** | Each folder is an independent layer with clean interfaces |
-| **Config-Driven** | All tunables in `.env` — no hard-coded secrets or magic numbers |
+| **Hardware Isolation** | `hardware/` uses ABCs; `simulation/` provides Windows replacements |
+| **Cloud AI, Local TTS** | STT + LLM on Groq cloud; eSpeak NG runs locally |
+| **Single API Key** | One `GROQ_API_KEY` for both Whisper STT and LLM |
+| **Memory-Conscious** | 384 MB soft cap; capped conversation history (10 turns) |
+| **Dependency Injection** | HardwareFactory auto-selects real vs simulated drivers |
+| **Config-Driven** | All tunables in `.env` — no hardcoded secrets |
+| **Fully Testable** | 99 tests run offline with mocked APIs and hardware |
 
 ---
 
 ## 📋 Development Roadmap
 
-- [x] Project structure & foundation
-- [ ] Platform detection & simulation layer
-- [ ] Speech-to-Text (Google Web Speech)
-- [ ] Text-to-Speech (pyttsx3)
-- [ ] LLM integration (Gemini API)
+- [x] Step 1: Project structure & foundation
+- [x] Step 2: Hardware abstraction layer
+- [x] Step 3: AI pipeline (STT + LLM + TTS)
+- [ ] Step 4: Main application integration
 - [ ] Wake-word detection
-- [ ] Voice pipeline end-to-end
-- [ ] GPIO hardware drivers
+- [ ] GPIO hardware drivers (on Pi)
 - [ ] Battery monitoring
-- [ ] Bluetooth audio
-- [ ] 3D-printed enclosure design
+- [ ] 3D-printed enclosure
 
 ---
 
@@ -184,11 +243,12 @@ The Raspberry Pi Zero W has:
 - **Storage**: microSD
 - **Connectivity**: Wi-Fi 802.11n, Bluetooth 4.1
 
-The software is designed to run within **~384 MB RAM** by:
-1. Offloading AI inference to cloud APIs
-2. Using lightweight libraries (no PyTorch, no TensorFlow)
-3. Capping conversation history and cache sizes
-4. Using streaming audio (never buffering entire recordings)
+The software runs within **~384 MB RAM** by:
+1. Offloading STT + LLM to Groq cloud API
+2. Using eSpeak NG (< 5 MB) for local TTS
+3. No PyTorch, TensorFlow, or local AI models
+4. Capping conversation history at 10 turns
+5. Lightweight Groq SDK (~2 MB installed)
 
 ---
 

@@ -49,21 +49,40 @@ class Settings:
 
     # ── General ────────────────────────────────────────────────
     PROJECT_NAME: str = "VIHAAN AI PIN"
-    VERSION: str = "0.1.0"
+    VERSION: str = "0.2.0"
     DEBUG: bool = _env_bool("DEBUG", False)
     LOG_LEVEL: str = _env("LOG_LEVEL", "INFO")
 
-    # ── AI / LLM ──────────────────────────────────────────────
-    OPENAI_API_KEY: str = _env("OPENAI_API_KEY")
-    GEMINI_API_KEY: str = _env("GEMINI_API_KEY")
-    LLM_PROVIDER: str = _env("LLM_PROVIDER", "gemini")       # gemini | openai | local
-    LLM_MODEL: str = _env("LLM_MODEL", "gemini-2.0-flash")
+    # ── Groq API (shared key for STT + LLM) ───────────────────
+    GROQ_API_KEY: str = _env("GROQ_API_KEY")
+
+    # ── Speech-to-Text (Groq Whisper) ─────────────────────────
+    STT_MODEL: str = _env("STT_MODEL", "whisper-large-v3-turbo")
+
+    # ── LLM (Groq) ────────────────────────────────────────────
+    LLM_MODEL: str = _env("LLM_MODEL", "openai/gpt-oss-120b")
     LLM_MAX_TOKENS: int = _env_int("LLM_MAX_TOKENS", 256)
     LLM_TEMPERATURE: float = float(_env("LLM_TEMPERATURE", "0.7"))
+    LLM_SYSTEM_PROMPT: str = _env(
+        "LLM_SYSTEM_PROMPT",
+        "You are VIHAAN, a helpful and concise voice assistant running on "
+        "a wearable AI pin. Keep responses short (1–3 sentences) and "
+        "spoken-language friendly. Avoid markdown, code blocks, or long "
+        "lists. Be warm, direct, and useful."
+    )
 
-    # ── Speech ────────────────────────────────────────────────
-    STT_ENGINE: str = _env("STT_ENGINE", "google")           # google | vosk | whisper
-    TTS_ENGINE: str = _env("TTS_ENGINE", "pyttsx3")          # pyttsx3 | espeak | cloud
+    # ── Text-to-Speech (eSpeak NG — local executable) ─────────
+    ESPEAK_EXECUTABLE: str = _env("ESPEAK_EXECUTABLE", "espeak-ng")
+    ESPEAK_VOICE: str = _env("ESPEAK_VOICE", "en")
+    ESPEAK_SPEED: int = _env_int("ESPEAK_SPEED", 150)
+
+    # ── Conversation ──────────────────────────────────────────
+    CONVERSATION_MAX_TURNS: int = _env_int("CONVERSATION_MAX_TURNS", 10)
+
+    # ── Groq API settings ─────────────────────────────────────
+    GROQ_TIMEOUT: int = _env_int("GROQ_TIMEOUT", 30)
+
+    # ── Wake Word ─────────────────────────────────────────────
     WAKE_WORD: str = _env("WAKE_WORD", "hey vihaan")
 
     # ── Audio ─────────────────────────────────────────────────
