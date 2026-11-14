@@ -3,9 +3,8 @@ simulation.sim_display — Simulated Display
 =============================================
 Drop-in replacement for PiDisplay on Windows / dev machines.
 
-Renders all display output to the console with formatted logging
-and emoji indicators — no physical display or graphics library
-required.
+Renders all display output to the console with formatted logging;
+no physical display or graphics library is required.
 
 Implements hardware.display.DisplayInterface.
 """
@@ -16,13 +15,13 @@ from hardware.display import DisplayInterface, DisplayStatus
 logger = logging.getLogger(__name__)
 
 
-# Status → emoji mapping for terminal output
-_STATUS_EMOJI = {
-    DisplayStatus.IDLE:      "⚪ IDLE      ",
-    DisplayStatus.LISTENING: "🟢 LISTENING ",
-    DisplayStatus.THINKING:  "🟡 THINKING  ",
-    DisplayStatus.SPEAKING:  "🔵 SPEAKING  ",
-    DisplayStatus.ERROR:     "🔴 ERROR     ",
+# Status labels for terminal output
+_STATUS_LABELS = {
+    DisplayStatus.IDLE: "IDLE",
+    DisplayStatus.LISTENING: "LISTENING",
+    DisplayStatus.THINKING: "PROCESSING",
+    DisplayStatus.SPEAKING: "SPEAKING",
+    DisplayStatus.ERROR: "ERROR",
 }
 
 
@@ -52,16 +51,16 @@ class SimDisplay(DisplayInterface):
     def show_text(self, text: str, line: int = 0) -> None:
         if 0 <= line < self.MAX_LINES:
             self._lines[line] = text
-        logger.info(f"📺 DISPLAY [{line}]: {text}")
+        logger.info("[DISPLAY %s]: %s", line, text)
 
     def show_status(self, status: DisplayStatus) -> None:
         self._status = status
-        label = _STATUS_EMOJI.get(status, status.value)
-        logger.info(f"📺 DISPLAY STATUS → {label}")
+        label = _STATUS_LABELS.get(status, status.value)
+        logger.info("[DISPLAY STATUS] %s", label)
 
     def clear(self) -> None:
         self._lines = [""] * self.MAX_LINES
-        logger.info("📺 DISPLAY: cleared")
+        logger.info("[DISPLAY] Cleared")
 
     def set_brightness(self, level: int) -> None:
         self._brightness = max(0, min(255, level))

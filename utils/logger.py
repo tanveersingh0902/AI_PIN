@@ -31,11 +31,13 @@ def setup_logging(level: str = "INFO", log_file: str = "vihaan.log") -> None:
     log_level = getattr(logging, level.upper(), logging.INFO)
 
     # ── Formatter ──────────────────────────────────────────────
-    fmt = "%(asctime)s │ %(levelname)-8s │ %(name)-20s │ %(message)s"
+    fmt = "%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s"
     datefmt = "%H:%M:%S"
     formatter = logging.Formatter(fmt, datefmt=datefmt)
 
     # ── Console Handler ────────────────────────────────────────
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="backslashreplace")
     console = logging.StreamHandler(sys.stdout)
     console.setLevel(log_level)
     console.setFormatter(formatter)

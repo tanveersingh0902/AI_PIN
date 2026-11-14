@@ -4,20 +4,20 @@
 
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-Raspberry%20Pi%20Zero%20W-green.svg)](https://www.raspberrypi.org/)
-[![Tests](https://img.shields.io/badge/Tests-99%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-offline-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/License-Private-red.svg)]()
 
 ---
 
 ## 📖 Overview
 
-VIHAAN AI PIN is a compact, wearable AI voice assistant designed to run on a **Raspberry Pi Zero W** (512 MB RAM). It listens for a wake word, captures speech, sends it to a cloud LLM, and speaks the response — all through a pin-sized form factor.
+VIHAAN AI PIN is a compact, wearable AI voice assistant designed for a **Raspberry Pi Zero W** (512 MB RAM). The user holds a push-to-talk button while speaking; speech is sent to Groq for recognition and reasoning, and the response is spoken locally.
 
-**Development** happens on Windows 11 with VS Code. **Deployment** targets Raspberry Pi OS Lite (32-bit). The architecture cleanly separates hardware from logic so the same codebase works on both platforms.
+**Development** happens on Windows 11 with VS Code. **Deployment** targets Raspberry Pi OS Lite (32-bit). The architecture separates hardware from logic; the Pi hardware path has not yet been physically tested.
 
 ---
 
-## 🧠 AI Architecture (Step 3)
+## 🧠 AI Architecture (Steps 3 and 4)
 
 | Component | Technology | Runs on |
 |---|---|---|
@@ -25,22 +25,16 @@ VIHAAN AI PIN is a compact, wearable AI voice assistant designed to run on a **R
 | **Language Model** | Groq `openai/gpt-oss-120b` | ☁️ Cloud |
 | **Text-to-Speech** | `espeak-ng` (local executable) | 💻 Device |
 
-### Pipeline Flow
+### Voice Workflow
 
 ```
-🎤 Microphone → Audio file
-                    ↓
-         Groq Whisper STT (cloud)
-                    ↓
-            Transcribed text
-                    ↓
-         Groq LLM (cloud)
-                    ↓
-           Generated response
-                    ↓
-         eSpeak NG TTS (local)
-                    ↓
-               🔊 Speaker
+Push-to-talk press → record until release → temporary WAV
+                                            ↓
+                             Groq Whisper transcription
+                                            ↓
+                              Groq LLM + conversation history
+                                            ↓
+                   local eSpeak NG WAV → hardware speaker playback
 ```
 
 ### Internet Requirements
@@ -51,6 +45,29 @@ VIHAAN AI PIN is a compact, wearable AI voice assistant designed to run on a **R
 | LLM (Groq) | ✅ Yes |
 | Text-to-Speech (eSpeak NG) | ❌ No — runs locally |
 | Hardware (mic, speaker, button) | ❌ No |
+
+---
+
+## Step 4: Main Assistant Integration
+
+`assistant/controller.py` coordinates the existing hardware abstractions and `ai.pipeline.AIPipeline`; it does not implement GPIO or duplicate the AI clients. Button callbacks only enqueue press/release events. The controller starts microphone capture on press, writes and validates the recording on release, and invokes the existing STT/LLM pipeline with direct TTS disabled. It then asks local eSpeak NG to create a WAV and plays that WAV once through the speaker abstraction. Conversation history remains in memory between interactions, and temporary recording/speech files are removed after each interaction.
+
+The controller owns `INITIALIZING`, `IDLE`, `LISTENING`, `PROCESSING`, `SPEAKING`, `ERROR`, and `SHUTDOWN` states. Recoverable errors are logged and return the assistant to `IDLE`. Optional display updates use the existing display abstraction; display failures do not stop the voice workflow. Cloud requests happen only after a non-silent recording is validated and the push-to-talk button is released.
+
+The model identifiers are fixed in the application: `whisper-large-v3-turbo` and `openai/gpt-oss-120b`. The only credential is `GROQ_API_KEY`. Unit tests mock the Groq clients and eSpeak output; they do not contact Groq or require physical hardware.
+
+### Windows simulation
+
+The hardware factory selects simulated microphone, button, speaker, and display on Windows. The simulated button uses Enter to start recording and another Enter to release it. When PyAudio is available, the simulated microphone may use the computer's default input device; otherwise, it produces silence, which the controller rejects without making a Groq request. The simulated speaker may use an available local playback backend or log the playback.
+
+To run the application, configure `.env` with a valid `GROQ_API_KEY`, install the Python requirements, and install eSpeak NG if you want audible TTS. Then run:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python main.py
+```
+
+Press Enter once, speak while recording, then press Enter again. If the simulated microphone produces silence or no usable input, the assistant skips the API calls and returns to ready. Press Ctrl+C to shut down.
 
 ---
 
@@ -88,9 +105,12 @@ AI_PIN/
 │   └── sim_display.py           #    Simulated display
 │
 ├── backend/                     # ⚙️ Application logic
-│   ├── pipeline.py              #    Voice assistant loop
+│   ├── pipeline.py              #    Earlier pipeline scaffold
 │   ├── state.py                 #    Device state machine
 │   └── session.py               #    Session manager
+│
+├── assistant/                   # 🎙️ Main application controller
+│   └── controller.py            #    Button-driven recording and response loop
 │
 ├── network/                     # 🌐 Connectivity
 │   ├── wifi.py                  #    Wi-Fi management
@@ -105,13 +125,14 @@ AI_PIN/
 ├── data/                        # 📁 Runtime data
 │   ├── logs/                    #    Log files
 │   ├── cache/                   #    Temporary cache
-│   └── models/                  #    Offline models (if any)
+│   └── models/                  #    Reserved; no local AI models are used
 │
-└── tests/                       # 🧪 Test suite (99 tests)
+└── tests/                       # 🧪 Offline unit tests
     ├── test_ai.py               #    AI pipeline tests (mocked)
     ├── test_hardware.py         #    Hardware abstraction tests
     ├── test_config.py           #    Configuration tests
     ├── test_pipeline.py         #    Backend pipeline tests
+    ├── test_assistant.py        #    Integrated assistant tests
     └── test_platform.py         #    Platform detection tests
 ```
 
@@ -121,17 +142,17 @@ AI_PIN/
 
 ### 1. Clone & Setup
 
-```bash
+```powershell
 git clone https://github.com/tanveersingh0902/AI_PIN.git
 cd AI_PIN
-python -m venv venv
-venv\Scripts\activate
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
 ### 2. Configure API Key
 
-```bash
+```powershell
 copy .env.example .env
 ```
 
@@ -143,7 +164,7 @@ GROQ_API_KEY=gsk_your_actual_groq_api_key_here
 
 Get a free key at: https://console.groq.com/keys
 
-### 3. Install eSpeak NG (optional for dev)
+### 3. Install eSpeak NG for speech output
 
 eSpeak NG is a **system executable**, not a pip package.
 
@@ -167,7 +188,7 @@ python main.py
 pytest tests/ -v
 ```
 
-All 99 tests run **without internet, API keys, or hardware**.
+The tests use mocked API clients and simulated hardware; they run without internet, API keys, or physical Raspberry Pi hardware.
 
 ---
 
@@ -175,7 +196,7 @@ All 99 tests run **without internet, API keys, or hardware**.
 
 ### Prerequisites
 
-- Raspberry Pi Zero W with Raspberry Pi OS Lite (32-bit)
+- Raspberry Pi Zero W with Raspberry Pi OS Lite (32-bit); the 40-pin header must be soldered before GPIO wiring
 - Python 3.9+
 - INMP441 I2S microphone
 - MAX98357A I2S amplifier + speaker
@@ -190,21 +211,18 @@ cd AI_PIN
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-pip install RPi.GPIO gpiozero  # Pi-specific
+pip install RPi.GPIO
 ```
 
-### Configure
+### Configure and run
 
 ```bash
 cp .env.example .env
 nano .env  # Set GROQ_API_KEY
-```
-
-### Run
-
-```bash
 python3 main.py
 ```
+
+Enable and configure I2S/ALSA for the microphone and amplifier before using real audio hardware. **Hardware has not been assembled or physically tested.** The current Pi microphone/speaker drivers require working PyAudio/ALSA configuration. The Pi display driver is still a stub; this step does not implement the deferred SPI display.
 
 ---
 
@@ -212,13 +230,13 @@ python3 main.py
 
 | Principle | How It's Applied |
 |---|---|
-| **Hardware Isolation** | `hardware/` uses ABCs; `simulation/` provides Windows replacements |
+| **Hardware Isolation** | `hardware/` defines interfaces; the factory selects real or simulated components |
 | **Cloud AI, Local TTS** | STT + LLM on Groq cloud; eSpeak NG runs locally |
 | **Single API Key** | One `GROQ_API_KEY` for both Whisper STT and LLM |
 | **Memory-Conscious** | 384 MB soft cap; capped conversation history (10 turns) |
 | **Dependency Injection** | HardwareFactory auto-selects real vs simulated drivers |
 | **Config-Driven** | All tunables in `.env` — no hardcoded secrets |
-| **Fully Testable** | 99 tests run offline with mocked APIs and hardware |
+| **Fully Testable** | Tests run offline with mocked APIs and simulated hardware |
 
 ---
 
@@ -227,7 +245,7 @@ python3 main.py
 - [x] Step 1: Project structure & foundation
 - [x] Step 2: Hardware abstraction layer
 - [x] Step 3: AI pipeline (STT + LLM + TTS)
-- [ ] Step 4: Main application integration
+- [x] Step 4: Main application integration
 - [ ] Wake-word detection
 - [ ] GPIO hardware drivers (on Pi)
 - [ ] Battery monitoring

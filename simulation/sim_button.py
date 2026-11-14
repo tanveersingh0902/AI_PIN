@@ -35,6 +35,8 @@ class SimButton(ButtonInterface):
         self._press_cb: Optional[Callable] = None
         self._release_cb: Optional[Callable] = None
         self._press_event = threading.Event()
+        self._closed = threading.Event()
+        self._input_thread: threading.Thread | None = None
         logger.info("SimButton: initialised (keyboard / programmatic trigger).")
 
     # ── Interface implementation ──────────────────────────────
@@ -59,11 +61,11 @@ class SimButton(ButtonInterface):
         """
         self._press_event.clear()
 
-        # Start a background thread that waits for Enter key
-        input_thread = threading.Thread(
-            target=self._input_listener, daemon=True
-        )
-        input_thread.start()
+        if self._input_thread is None or not self._input_thread.is_alive():
+            self._input_thread = threading.Thread(
+                target=self._input_listener, daemon=True
+            )
+            self._input_thread.start()
 
         pressed = self._press_event.wait(timeout=timeout)
         if pressed:
@@ -73,10 +75,13 @@ class SimButton(ButtonInterface):
         return pressed
 
     def _input_listener(self):
-        """Listen for Enter key in the terminal."""
+        """Use successive Enter presses to simulate press and release."""
         try:
-            input("  [SimButton] Press ENTER to simulate button press → ")
-            self.simulate_press()
+            while not self._closed.is_set():
+                input("  [SimButton] Press ENTER to start recording → ")
+                self.simulate_press()
+                input("  [SimButton] Press ENTER to stop recording → ")
+                self.simulate_release()
         except (EOFError, OSError):
             # Not running in an interactive terminal (CI / pytest / test)
             pass
@@ -102,6 +107,7 @@ class SimButton(ButtonInterface):
     # ── Cleanup ───────────────────────────────────────────────
 
     def cleanup(self) -> None:
+        self._closed.set()
         self._pressed = False
         self._press_cb = None
         self._release_cb = None

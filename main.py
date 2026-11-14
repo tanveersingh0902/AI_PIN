@@ -1,68 +1,95 @@
-"""
-VIHAAN AI PIN — Main Entry Point
-=================================
-Wearable AI Voice Assistant based on Raspberry Pi Zero W.
+"""VIHAAN AI PIN application entry point."""
 
-This is the top-level launcher. It:
-  1. Loads configuration and environment variables.
-  2. Detects the runtime platform (Windows dev ↔ Raspberry Pi).
-  3. Initialises the appropriate hardware layer (real or simulated).
-  4. Starts the voice-assistant pipeline loop.
-
-Usage
------
-  Development (Windows):   python main.py
-  Production  (Pi):        python3 main.py
-"""
-
-import sys
-import signal
 import logging
+import signal
 
-from config import settings
+from ai.conversation import ConversationManager
+from ai.llm import LLMClient
+from ai.pipeline import AIPipeline
+from ai.speech_to_text import SpeechToText
+from ai.text_to_speech import TextToSpeech
+from assistant.controller import AssistantController
+from config import CACHE_DIR, settings
+from hardware.factory import HardwareFactory, HardwareKit
 from utils.logger import setup_logging
-from utils.platform_detect import detect_platform, Platform
-from backend.pipeline import VoiceAssistantPipeline
+from utils.platform_detect import detect_platform
 
 
-def graceful_shutdown(signum, frame):
-    """Handle SIGINT / SIGTERM for clean exit."""
-    logging.info("Shutdown signal received — cleaning up …")
-    sys.exit(0)
+def _handle_shutdown_signal(_signum, _frame) -> None:
+    del _signum, _frame
+    raise KeyboardInterrupt
 
 
-def main():
-    # ── 1. Logging ──────────────────────────────────────────────
+def main() -> int:
     setup_logging(level=settings.LOG_LEVEL)
     logger = logging.getLogger("vihaan")
-
-    # ── 2. Platform Detection ──────────────────────────────────
     platform = detect_platform()
-    logger.info(f"Platform detected: {platform.value}")
-    logger.info(f"Project : {settings.PROJECT_NAME} v{settings.VERSION}")
+    logger.info("Platform detected: %s", platform.value)
+    logger.info("%s v%s", settings.PROJECT_NAME, settings.VERSION)
 
-    if platform == Platform.RASPBERRY_PI:
-        logger.info("Running on Raspberry Pi — using real hardware drivers.")
-    else:
-        logger.info("Running on development machine — using simulated hardware.")
-
-    # ── 3. Signal Handlers ─────────────────────────────────────
-    signal.signal(signal.SIGINT, graceful_shutdown)
+    signal.signal(signal.SIGINT, _handle_shutdown_signal)
     if hasattr(signal, "SIGTERM"):
-        signal.signal(signal.SIGTERM, graceful_shutdown)
+        signal.signal(signal.SIGTERM, _handle_shutdown_signal)
 
-    # ── 4. Pipeline ────────────────────────────────────────────
-    pipeline = VoiceAssistantPipeline(platform=platform)
-    logger.info("Voice assistant pipeline initialised.")
+    if not settings.GROQ_API_KEY:
+        logger.error("GROQ_API_KEY is missing. Set it in the environment or .env.")
+        return 1
 
+    hardware: HardwareKit | None = None
+    assistant: AssistantController | None = None
     try:
-        pipeline.run()
+        hardware = HardwareFactory.create(
+            platform=platform,
+            sample_rate=settings.AUDIO_SAMPLE_RATE,
+            channels=settings.AUDIO_CHANNELS,
+            chunk_size=settings.AUDIO_CHUNK_SIZE,
+            button_pin=settings.BUTTON_GPIO_PIN,
+            enable_display=True,
+            enable_camera=False,
+        )
+
+        stt = SpeechToText(
+            api_key=settings.GROQ_API_KEY,
+            model="whisper-large-v3-turbo",
+            timeout=settings.GROQ_TIMEOUT,
+        )
+        llm = LLMClient(
+            api_key=settings.GROQ_API_KEY,
+            model="openai/gpt-oss-120b",
+            max_tokens=settings.LLM_MAX_TOKENS,
+            temperature=settings.LLM_TEMPERATURE,
+            timeout=settings.GROQ_TIMEOUT,
+            system_prompt=settings.LLM_SYSTEM_PROMPT,
+        )
+        tts = TextToSpeech(
+            executable=settings.ESPEAK_EXECUTABLE,
+            voice=settings.ESPEAK_VOICE,
+            speed=settings.ESPEAK_SPEED,
+        )
+        conversation = ConversationManager(
+            system_prompt=settings.LLM_SYSTEM_PROMPT,
+            max_turns=settings.CONVERSATION_MAX_TURNS,
+        )
+        ai_pipeline = AIPipeline(stt, llm, tts, conversation)
+        assistant = AssistantController(
+            hardware=hardware,
+            ai_pipeline=ai_pipeline,
+            tts=tts,
+            recording_dir=CACHE_DIR,
+        )
+        return 0 if assistant.run() else 1
     except KeyboardInterrupt:
-        logger.info("Interrupted by user.")
+        logger.info("Interrupted; shutting down.")
+        return 0
+    except Exception:
+        logger.exception("VIHAAN could not start or stopped unexpectedly.")
+        return 1
     finally:
-        pipeline.shutdown()
-        logger.info("VIHAAN AI PIN shut down cleanly.")
+        if assistant is not None:
+            assistant.shutdown()
+        elif hardware is not None:
+            hardware.cleanup()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
