@@ -18,6 +18,6 @@ Modules
 - display.py    : Optional SPI TFT display
 - camera.py     : Optional camera (CSI / USB)
 - led.py        : Status LED(s) via GPIO
-- battery.py    : Battery voltage reading via ADC (SPI)
+- battery monitoring: planned; no driver is implemented
 - factory.py    : Hardware factory — dependency injection
 """

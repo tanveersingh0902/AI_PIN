@@ -14,6 +14,8 @@ This module does NOT play audio through speakers.  It either:
   2. Saves speech to a WAV file for the hardware speaker layer.
 """
 
+from __future__ import annotations
+
 import shutil
 import logging
 import subprocess

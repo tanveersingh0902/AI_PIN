@@ -12,6 +12,8 @@ Behaviour:
 Implements hardware.microphone.MicrophoneInterface.
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 import time
@@ -83,6 +85,9 @@ class SimMicrophone(MicrophoneInterface):
         if self._recording:
             logger.warning("SimMicrophone: already recording.")
             return
+        if self._thread and self._thread.is_alive():
+            raise RuntimeError("Previous simulated recording is still active.")
+        self._thread = None
         self._frames = []
         self._recording = True
         self._thread = threading.Thread(target=self._record_loop, daemon=True)
@@ -97,6 +102,7 @@ class SimMicrophone(MicrophoneInterface):
 
     def _record_loop_pyaudio(self):
         """Record from the real system mic via PyAudio."""
+        stream = None
         try:
             stream = self._audio.open(
                 format=_pa.paInt16,
@@ -109,11 +115,21 @@ class SimMicrophone(MicrophoneInterface):
                 data = stream.read(self._chunk_size, exception_on_overflow=False)
                 with self._lock:
                     self._frames.append(data)
-            stream.stop_stream()
-            stream.close()
         except Exception as e:
             logger.error(f"SimMicrophone PyAudio error: {e}")
             self._recording = False
+        finally:
+            if stream is not None:
+                try:
+                    stream.stop_stream()
+                except Exception:
+                    logger.debug("SimMicrophone stream stop failed.", exc_info=True)
+                try:
+                    stream.close()
+                except Exception:
+                    logger.warning(
+                        "SimMicrophone stream close failed.", exc_info=True
+                    )
 
     def _record_loop_silence(self):
         """Generate silent frames at the correct rate."""
@@ -125,11 +141,14 @@ class SimMicrophone(MicrophoneInterface):
             time.sleep(interval)
 
     def stop_recording(self) -> bytes:
-        if not self._recording:
+        if not self._recording and self._thread is None:
             return b""
         self._recording = False
-        if self._thread:
-            self._thread.join(timeout=3.0)
+        thread = self._thread
+        if thread:
+            thread.join(timeout=3.0)
+            if thread.is_alive():
+                raise RuntimeError("Simulated microphone did not stop in time.")
             self._thread = None
         with self._lock:
             audio = b"".join(self._frames)
@@ -145,6 +164,7 @@ class SimMicrophone(MicrophoneInterface):
         return self._record_silence(duration)
 
     def _record_pyaudio(self, duration: float) -> bytes:
+        stream = None
         try:
             stream = self._audio.open(
                 format=_pa.paInt16,
@@ -159,14 +179,24 @@ class SimMicrophone(MicrophoneInterface):
             for _ in range(num_chunks):
                 data = stream.read(self._chunk_size, exception_on_overflow=False)
                 frames.append(data)
-            stream.stop_stream()
-            stream.close()
             audio = b"".join(frames)
             logger.info(f"SimMicrophone: captured {len(audio)} bytes.")
             return audio
         except Exception as e:
             logger.error(f"SimMicrophone record error: {e}")
             return b""
+        finally:
+            if stream is not None:
+                try:
+                    stream.stop_stream()
+                except Exception:
+                    logger.debug("SimMicrophone stream stop failed.", exc_info=True)
+                try:
+                    stream.close()
+                except Exception:
+                    logger.warning(
+                        "SimMicrophone stream close failed.", exc_info=True
+                    )
 
     def _record_silence(self, duration: float) -> bytes:
         num_samples = int(self._sample_rate * duration)
@@ -178,8 +208,15 @@ class SimMicrophone(MicrophoneInterface):
 
     def cleanup(self) -> None:
         self._recording = False
-        if self._thread:
-            self._thread.join(timeout=2.0)
+        thread = self._thread
+        if thread:
+            thread.join(timeout=3.0)
+        if thread and thread.is_alive():
+            logger.error("Simulated microphone thread did not stop; audio retained.")
+            return
+        self._thread = None
+        with self._lock:
+            self._frames = []
         if self._audio:
             try:
                 self._audio.terminate()

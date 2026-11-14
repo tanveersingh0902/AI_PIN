@@ -1,11 +1,11 @@
 """
 network — Connectivity Layer
 ==============================
-Manages Wi-Fi, Bluetooth, and outbound HTTP/API communication.
+Provides read-only connectivity checks and generic network helpers.
 
 Modules
 -------
-- wifi.py       : Wi-Fi status and connection management
+- wifi.py       : Wi-Fi association status detection (no configuration changes)
 - bluetooth.py  : Bluetooth audio streaming (future)
-- api_client.py : Shared HTTP client with timeouts and retries
+- api_client.py : Optional generic requests client (not used by Groq clients)
 """

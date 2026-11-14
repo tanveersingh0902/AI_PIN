@@ -15,6 +15,8 @@ The pipeline receives a HardwareKit from the factory — it never
 imports hardware drivers directly.
 """
 
+from __future__ import annotations
+
 import logging
 from utils.platform_detect import Platform
 from hardware.factory import HardwareFactory, HardwareKit

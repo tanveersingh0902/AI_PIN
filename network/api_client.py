@@ -1,15 +1,10 @@
-"""
-network.api_client — Shared HTTP Client
-=========================================
-A thin wrapper around `requests` with sensible defaults for a
-resource-constrained device:
-  - Connection timeout (prevents hanging on bad networks)
-  - Automatic retries with backoff
-  - Response size limits (protect 512 MB RAM)
+"""Generic requests wrapper retained for non-Groq HTTP integrations.
 
-All outbound API calls (LLM, cloud TTS, etc.) should go through
-this client.
+The VIHAAN assistant uses the Groq SDK directly with bounded retries
+from network.retry.
 """
+
+from __future__ import annotations
 
 import logging
 from typing import Any, Optional
@@ -24,7 +19,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT = 10         # seconds
 MAX_RETRIES = 2
 BACKOFF_FACTOR = 0.5
-MAX_RESPONSE_BYTES = 1 * 1024 * 1024  # 1 MB safety cap
 
 
 def _create_session() -> requests.Session:
@@ -55,12 +49,12 @@ def get_session() -> requests.Session:
 def api_get(url: str, params: dict | None = None,
             timeout: int = DEFAULT_TIMEOUT, **kwargs: Any) -> requests.Response:
     """GET with timeout and logging."""
-    logger.debug(f"GET {url}")
+    logger.debug("GET request")
     return get_session().get(url, params=params, timeout=timeout, **kwargs)
 
 
 def api_post(url: str, json: dict | None = None,
              timeout: int = DEFAULT_TIMEOUT, **kwargs: Any) -> requests.Response:
     """POST with timeout and logging."""
-    logger.debug(f"POST {url}")
+    logger.debug("POST request")
     return get_session().post(url, json=json, timeout=timeout, **kwargs)

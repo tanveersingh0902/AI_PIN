@@ -9,7 +9,7 @@ Priority: ENV vars  >  .env file  >  defaults defined here.
 
 import os
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # ── Load .env if python-dotenv is available ────────────────────
 try:
@@ -31,6 +31,13 @@ def _env_bool(key: str, default: bool = False) -> bool:
 def _env_int(key: str, default: int = 0) -> int:
     try:
         return int(_env(key, str(default)))
+    except ValueError:
+        return default
+
+
+def _env_float(key: str, default: float = 0.0) -> float:
+    try:
+        return float(_env(key, str(default)))
     except ValueError:
         return default
 
@@ -62,7 +69,7 @@ class Settings:
     # ── LLM (Groq) ────────────────────────────────────────────
     LLM_MODEL: str = _env("LLM_MODEL", "openai/gpt-oss-120b")
     LLM_MAX_TOKENS: int = _env_int("LLM_MAX_TOKENS", 256)
-    LLM_TEMPERATURE: float = float(_env("LLM_TEMPERATURE", "0.7"))
+    LLM_TEMPERATURE: float = _env_float("LLM_TEMPERATURE", 0.7)
     LLM_SYSTEM_PROMPT: str = _env(
         "LLM_SYSTEM_PROMPT",
         "You are VIHAAN, a helpful and concise voice assistant running on "
@@ -82,6 +89,16 @@ class Settings:
     # ── Groq API settings ─────────────────────────────────────
     GROQ_TIMEOUT: int = _env_int("GROQ_TIMEOUT", 30)
 
+    # ── Connectivity ──────────────────────────────────────────
+    NETWORK_CONNECTION_TIMEOUT: int = _env_int(
+        "NETWORK_CONNECTION_TIMEOUT", 15
+    )
+    CONNECTIVITY_CHECK_TIMEOUT: float = _env_float(
+        "CONNECTIVITY_CHECK_TIMEOUT", 2.0
+    )
+    NETWORK_RETRY_COUNT: int = _env_int("NETWORK_RETRY_COUNT", 2)
+    NETWORK_RETRY_DELAY: float = _env_float("NETWORK_RETRY_DELAY", 0.5)
+
     # ── Wake Word ─────────────────────────────────────────────
     WAKE_WORD: str = _env("WAKE_WORD", "hey vihaan")
 
@@ -89,11 +106,6 @@ class Settings:
     AUDIO_SAMPLE_RATE: int = _env_int("AUDIO_SAMPLE_RATE", 16000)
     AUDIO_CHANNELS: int = _env_int("AUDIO_CHANNELS", 1)
     AUDIO_CHUNK_SIZE: int = _env_int("AUDIO_CHUNK_SIZE", 1024)
-
-    # ── Network ───────────────────────────────────────────────
-    WIFI_SSID: str = _env("WIFI_SSID")
-    WIFI_PASSWORD: str = _env("WIFI_PASSWORD")
-    API_TIMEOUT: int = _env_int("API_TIMEOUT", 10)
 
     # ── Hardware (Pi-specific) ────────────────────────────────
     BUTTON_GPIO_PIN: int = _env_int("BUTTON_GPIO_PIN", 17)

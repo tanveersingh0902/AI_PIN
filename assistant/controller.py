@@ -1,5 +1,7 @@
 """Coordinates button input, audio capture, AI processing, and playback."""
 
+from __future__ import annotations
+
 import logging
 import queue
 import tempfile
@@ -11,6 +13,7 @@ from pathlib import Path
 
 from ai.pipeline import AIPipeline
 from ai.text_to_speech import TextToSpeech
+from backend.network_manager import NetworkManager
 from hardware.display import DisplayStatus
 from hardware.factory import HardwareKit
 from utils.platform_detect import Platform
@@ -37,17 +40,21 @@ class AssistantController:
         ai_pipeline: AIPipeline,
         tts: TextToSpeech,
         recording_dir: str | Path | None = None,
+        network_manager: NetworkManager | None = None,
     ):
         self.hardware = hardware
         self.ai_pipeline = ai_pipeline
         self.tts = tts
+        self.network_manager = network_manager
         self.recording_dir = Path(recording_dir or tempfile.gettempdir())
         self._events: queue.Queue[str] = queue.Queue()
         self._state = AssistantState.INITIALIZING
         self._state_lock = threading.Lock()
-        self._shutdown_lock = threading.Lock()
+        self._shutdown_lock = threading.RLock()
+        self._shutdown_event = threading.Event()
         self._running = False
         self._shutdown_complete = False
+        self._deferred_cleanup = False
         self._press_active = False
         self._temporary_files: set[Path] = set()
 
@@ -93,6 +100,7 @@ class AssistantController:
         """Request the run loop to stop."""
         self._running = False
         self._events.put("shutdown")
+        self.shutdown()
 
     def shutdown(self) -> None:
         """Stop active audio and release hardware resources, once."""
@@ -101,6 +109,20 @@ class AssistantController:
                 return
             self._shutdown_complete = True
             self._running = False
+            self._shutdown_event.set()
+            active_work = self.state in (
+                AssistantState.PROCESSING,
+                AssistantState.SPEAKING,
+            )
+            self._deferred_cleanup = active_work
+        if active_work:
+            try:
+                self.hardware.speaker.stop_playback()
+            except Exception:
+                logger.exception("Could not stop speaker during shutdown.")
+            self._set_state(AssistantState.SHUTDOWN)
+            logger.info("Hardware cleanup deferred until active work ends.")
+            return
 
         if self.hardware.microphone.is_recording:
             try:
@@ -147,14 +169,30 @@ class AssistantController:
         except Exception as exc:
             self._recover_from_error(f"Voice interaction failed: {exc}")
         finally:
-            if self.state not in (AssistantState.SHUTDOWN, AssistantState.IDLE):
-                self._set_state(
-                    AssistantState.IDLE, "VIHAAN READY", DisplayStatus.IDLE
-                )
+            with self._shutdown_lock:
+                if (
+                    not self._shutdown_complete
+                    and self.state not in (AssistantState.SHUTDOWN, AssistantState.IDLE)
+                ):
+                    self._set_state(
+                        AssistantState.IDLE, "VIHAAN READY", DisplayStatus.IDLE
+                    )
             self._discard_queued_button_events()
+            self._finish_deferred_cleanup()
+
+    def _finish_deferred_cleanup(self) -> None:
+        with self._shutdown_lock:
+            if not self._deferred_cleanup:
+                return
+            self._deferred_cleanup = False
+        self._cleanup_temporary_files()
+        self.hardware.cleanup()
+        logger.info("VIHAAN hardware cleanup completed after active work.")
 
     def _process_recording(self) -> None:
         audio_data = self.hardware.microphone.stop_recording()
+        if self._shutdown_event.is_set():
+            return
         if not audio_data:
             logger.warning("No audio was captured; waiting for the next press.")
             return
@@ -176,11 +214,32 @@ class AssistantController:
                 logger.info("Recording is empty or silent; skipping AI requests.")
                 return
 
+            if (
+                self.network_manager is not None
+                and not self.network_manager.check_status().internet_available
+            ):
+                self._announce_offline()
+                return
+
+            if self._shutdown_event.is_set():
+                return
             result = self.ai_pipeline.process_audio_file(
                 str(recording_path), speak=False
             )
+            if self._shutdown_event.is_set():
+                return
             if result.error:
-                self._recover_from_error(f"AI pipeline failed: {result.error}")
+                if (
+                    self.network_manager is not None
+                    and not self.network_manager.check_status().internet_available
+                ):
+                    self._announce_offline()
+                    return
+                detail = self._last_ai_error()
+                message = f"AI pipeline failed: {result.error}"
+                if detail:
+                    message = f"{message} ({detail})"
+                self._recover_from_error(message)
                 return
             if not result.transcription or not result.response:
                 self._recover_from_error(
@@ -192,7 +251,22 @@ class AssistantController:
         finally:
             self._remove_temporary_file(recording_path)
 
+    def _announce_offline(self) -> None:
+        logger.warning("Internet is unavailable; skipping cloud AI requests.")
+        self._speak_response(
+            "Internet is unavailable. Please reconnect and try again."
+        )
+
+    def _last_ai_error(self) -> str | None:
+        for component in (self.ai_pipeline.stt, self.ai_pipeline.llm):
+            detail = getattr(component, "last_error", None)
+            if detail:
+                return str(detail)
+        return None
+
     def _speak_response(self, response: str) -> None:
+        if self._shutdown_event.is_set():
+            return
         self._set_state(
             AssistantState.SPEAKING, "SPEAKING", DisplayStatus.SPEAKING
         )
@@ -209,11 +283,23 @@ class AssistantController:
                 self._recover_from_error("eSpeak NG produced an empty audio file.")
                 return
 
+            if self._shutdown_event.is_set():
+                return
             if self.hardware.speaker.is_playing:
                 self.hardware.speaker.stop_playback()
-            self.hardware.speaker.play_wav(generated_path)
+            with self._shutdown_lock:
+                if self._shutdown_complete:
+                    return
+                self.hardware.speaker.play_wav(generated_path)
             while self._running and self.hardware.speaker.is_playing:
                 time.sleep(0.05)
+            playback_error = getattr(
+                self.hardware.speaker, "last_playback_error", None
+            )
+            if playback_error and not self._shutdown_event.is_set():
+                self._recover_from_error(
+                    f"Speaker playback failed: {playback_error}"
+                )
         except Exception as exc:
             self._recover_from_error(f"Speech output failed: {exc}")
         finally:
@@ -266,7 +352,7 @@ class AssistantController:
 
     def _recover_from_error(self, message: str) -> None:
         logger.error("%s", message)
-        if self.state == AssistantState.SHUTDOWN:
+        if self._shutdown_event.is_set() or self.state == AssistantState.SHUTDOWN:
             return
         self._set_state(AssistantState.ERROR, "ERROR", DisplayStatus.ERROR)
         self._set_state(
@@ -279,9 +365,15 @@ class AssistantController:
         display_text: str | None = None,
         display_status: DisplayStatus | None = None,
     ) -> None:
-        with self._state_lock:
-            previous_state = self._state
-            self._state = new_state
+        with self._shutdown_lock:
+            if (
+                new_state != AssistantState.SHUTDOWN
+                and self._shutdown_event.is_set()
+            ):
+                return
+            with self._state_lock:
+                previous_state = self._state
+                self._state = new_state
         if previous_state != new_state:
             logger.info("Assistant state: %s -> %s", previous_state.name, new_state.name)
         if display_text is not None or display_status is not None:

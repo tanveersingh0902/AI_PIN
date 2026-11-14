@@ -11,6 +11,8 @@ Pi-specific dependencies (lazy-imported):
   - pyaudio
 """
 
+from __future__ import annotations
+
 import io
 import wave
 import logging
@@ -202,8 +204,10 @@ class PiMicrophone(MicrophoneInterface):
 
     def _record_loop(self):
         """Background recording loop (runs in a thread)."""
+        stream = None
         try:
             stream = self._open_stream()
+            self._stream = stream
             logger.info("PiMicrophone: recording started.")
             while self._recording:
                 try:
@@ -214,10 +218,21 @@ class PiMicrophone(MicrophoneInterface):
                 except Exception as e:
                     logger.error(f"Mic read error: {e}")
                     break
-            stream.stop_stream()
-            stream.close()
         except Exception as e:
             logger.error(f"PiMicrophone recording failed: {e}")
+        finally:
+            if stream is not None:
+                try:
+                    stream.stop_stream()
+                except Exception:
+                    logger.debug("PiMicrophone stream stop failed.", exc_info=True)
+                try:
+                    stream.close()
+                except Exception:
+                    logger.warning(
+                        "PiMicrophone stream close failed.", exc_info=True
+                    )
+            self._stream = None
             self._recording = False
 
     # ── Public API ────────────────────────────────────────────
@@ -226,6 +241,9 @@ class PiMicrophone(MicrophoneInterface):
         if self._recording:
             logger.warning("Already recording.")
             return
+        if self._record_thread and self._record_thread.is_alive():
+            raise RuntimeError("Previous microphone recording is still active.")
+        self._record_thread = None
         self._ensure_audio()
         self._frames = []
         self._recording = True
@@ -235,12 +253,15 @@ class PiMicrophone(MicrophoneInterface):
         self._record_thread.start()
 
     def stop_recording(self) -> bytes:
-        if not self._recording:
+        if not self._recording and self._record_thread is None:
             logger.warning("Not currently recording.")
             return b""
         self._recording = False
-        if self._record_thread:
-            self._record_thread.join(timeout=3.0)
+        thread = self._record_thread
+        if thread:
+            thread.join(timeout=3.0)
+            if thread.is_alive():
+                raise RuntimeError("Microphone recording did not stop in time.")
             self._record_thread = None
         with self._lock:
             audio_data = b"".join(self._frames)
@@ -263,8 +284,14 @@ class PiMicrophone(MicrophoneInterface):
         except Exception as e:
             logger.error(f"PiMicrophone record error: {e}")
         finally:
-            stream.stop_stream()
-            stream.close()
+            try:
+                stream.stop_stream()
+            except Exception:
+                logger.debug("PiMicrophone stream stop failed.", exc_info=True)
+            try:
+                stream.close()
+            except Exception:
+                logger.warning("PiMicrophone stream close failed.", exc_info=True)
 
         audio_data = b"".join(frames)
         logger.info(f"PiMicrophone: captured {len(audio_data)} bytes.")
@@ -272,17 +299,25 @@ class PiMicrophone(MicrophoneInterface):
 
     def cleanup(self) -> None:
         self._recording = False
-        if self._record_thread:
-            self._record_thread.join(timeout=2.0)
-        if self._stream:
+        thread = self._record_thread
+        if thread:
+            thread.join(timeout=3.0)
+        if thread and thread.is_alive() and self._stream:
             try:
-                self._stream.close()
+                self._stream.stop_stream()
             except Exception:
-                pass
+                logger.debug("Could not interrupt microphone stream.", exc_info=True)
+            thread.join(timeout=1.0)
+        if thread and thread.is_alive():
+            logger.error("Microphone recording thread did not stop; audio retained.")
+            return
+        self._record_thread = None
+        with self._lock:
+            self._frames = []
         if self._audio:
             try:
                 self._audio.terminate()
             except Exception:
-                pass
+                logger.warning("PyAudio termination failed.", exc_info=True)
             self._audio = None
         logger.info("PiMicrophone: cleaned up.")

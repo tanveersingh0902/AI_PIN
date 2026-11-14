@@ -106,7 +106,6 @@ class AIPipeline:
         # ── Step 2: LLM Query ────────────────────────────────
         logger.info("Pipeline Step 2/3: LLM query …")
         try:
-            self.conversation.add_user_message(result.transcription)
             result.response = self.llm.query(
                 result.transcription,
                 conversation_history=self.conversation.get_history(),
@@ -121,6 +120,7 @@ class AIPipeline:
             logger.warning(result.error)
             return result
 
+        self.conversation.add_user_message(result.transcription)
         self.conversation.add_assistant_message(result.response)
 
         # ── Step 3: Text-to-Speech ────────────────────────────
@@ -172,7 +172,6 @@ class AIPipeline:
         # ── Step 2: LLM Query ────────────────────────────────
         logger.info("Pipeline Step 2/3: LLM query …")
         try:
-            self.conversation.add_user_message(result.transcription)
             result.response = self.llm.query(
                 result.transcription,
                 conversation_history=self.conversation.get_history(),
@@ -187,6 +186,7 @@ class AIPipeline:
             logger.warning(result.error)
             return result
 
+        self.conversation.add_user_message(result.transcription)
         self.conversation.add_assistant_message(result.response)
 
         # ── Step 3: Text-to-Speech ────────────────────────────

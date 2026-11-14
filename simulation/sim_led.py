@@ -7,6 +7,8 @@ Prints LED state changes to the console with colour codes / emoji.
 Implements hardware.led.BaseLED interface.
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 from hardware.led import BaseLED

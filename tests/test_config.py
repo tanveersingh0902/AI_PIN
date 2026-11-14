@@ -18,6 +18,10 @@ def test_default_settings():
     assert s.ESPEAK_EXECUTABLE == "espeak-ng"
     assert s.AUDIO_SAMPLE_RATE == 16000
     assert s.MAX_MEMORY_MB == 384
+    assert s.NETWORK_CONNECTION_TIMEOUT == 15
+    assert s.CONNECTIVITY_CHECK_TIMEOUT == 2.0
+    assert s.NETWORK_RETRY_COUNT == 2
+    assert s.NETWORK_RETRY_DELAY == 0.5
 
 
 def test_project_paths():

@@ -11,6 +11,8 @@ Pi-specific dependencies (lazy-imported):
   - RPi.GPIO
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 from abc import ABC, abstractmethod
@@ -166,11 +168,15 @@ class PiButton(ButtonInterface):
         return self._press_event.wait(timeout=timeout)
 
     def cleanup(self) -> None:
-        if self._gpio and self._setup_done:
+        if self._gpio:
             try:
-                self._gpio.remove_event_detect(self._gpio_pin)
+                if self._setup_done:
+                    self._gpio.remove_event_detect(self._gpio_pin)
+            except Exception as e:
+                logger.warning("PiButton event cleanup warning: %s", e)
+            try:
                 self._gpio.cleanup(self._gpio_pin)
             except Exception as e:
-                logger.warning(f"PiButton cleanup warning: {e}")
+                logger.warning("PiButton GPIO cleanup warning: %s", e)
         self._setup_done = False
         logger.info("PiButton: cleaned up.")

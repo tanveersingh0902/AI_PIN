@@ -17,7 +17,7 @@ VIHAAN AI PIN is a compact, wearable AI voice assistant designed for a **Raspber
 
 ---
 
-## 🧠 AI Architecture (Steps 3 and 4)
+## 🧠 Architecture (Steps 3–6)
 
 | Component | Technology | Runs on |
 |---|---|---|
@@ -25,7 +25,7 @@ VIHAAN AI PIN is a compact, wearable AI voice assistant designed for a **Raspber
 | **Language Model** | Groq `openai/gpt-oss-120b` | ☁️ Cloud |
 | **Text-to-Speech** | `espeak-ng` (local executable) | 💻 Device |
 
-### Voice Workflow
+### Module responsibilities and workflow
 
 ```
 Push-to-talk press → record until release → temporary WAV
@@ -35,7 +35,13 @@ Push-to-talk press → record until release → temporary WAV
                               Groq LLM + conversation history
                                             ↓
                    local eSpeak NG WAV → hardware speaker playback
+                                            ↓
+                                    return to IDLE
 ```
+
+`main.py` loads settings, configures logging, constructs the hardware kit and AI clients, then starts `assistant.controller.AssistantController`. The controller owns button events, assistant state, recording validation, offline checks, response synthesis/playback, and temporary-file cleanup. `ai.pipeline.AIPipeline` coordinates STT, LLM, and conversation history; `ai.speech_to_text` and `ai.llm` own Groq requests/retries; `ai.text_to_speech` invokes local eSpeak NG. `hardware.factory` selects real or simulated input/output, while `backend.network_manager` is hardware-independent.
+
+The `backend.pipeline.py`, `backend.state.py`, and `backend.session.py` files are earlier Step 1 scaffolding, not used by `main.py`. Likewise, `ai/stt.py` and `ai/tts.py` are superseded stubs. `network/api_client.py` is a generic requests helper, not used by Groq. Wake-word, LED, camera capture, and SPI display implementations are not part of the active assistant workflow.
 
 ### Internet Requirements
 
@@ -56,11 +62,44 @@ The controller owns `INITIALIZING`, `IDLE`, `LISTENING`, `PROCESSING`, `SPEAKING
 
 The model identifiers are fixed in the application: `whisper-large-v3-turbo` and `openai/gpt-oss-120b`. The only credential is `GROQ_API_KEY`. Unit tests mock the Groq clients and eSpeak output; they do not contact Groq or require physical hardware.
 
+## Step 6: Full-System Verification
+
+Run the complete offline test suite from the project root:
+
+```powershell
+python -m pytest -q
+```
+
+Focused suites can be run with `python -m pytest tests/test_assistant.py tests/test_ai.py -q`, `python -m pytest tests/test_hardware.py -q`, or `python -m pytest tests/test_network_manager.py -q`. Groq requests, eSpeak subprocesses, audio devices, and connectivity probes are mocked in tests. No API key, internet access, or Raspberry Pi is needed to run the test suite.
+
+The tests verify the event-driven voice workflow, conversation history, offline and mid-request recovery, bounded retries, simulated Windows hardware, temporary-file cleanup, and failure handling. They do not prove physical microphone quality, GPIO debounce behavior, Wi-Fi reachability on the Pi, or actual I2S playback.
+
+## Step 5: Networking and Offline Recovery
+
+`backend/network_manager.py` reports Wi-Fi association separately from internet access. Wi-Fi status is read-only and platform-specific where detectable (Windows `netsh`; Linux wireless tools/sysfs); unsupported or unavailable status is reported as unknown. Internet reachability uses a short TCP connection check to `1.1.1.1:443`. A Wi-Fi connection alone is not treated as internet access. Diagnostics report whether the Groq key is configured, never its value, and retain the timestamp of the last successful check.
+
+The application checks connectivity at startup for diagnostics and again before each cloud pipeline run. It does not poll in a background thread, change OS network settings, or try to reconnect Wi-Fi itself. `wait_for_connectivity()` is available for bounded, explicitly requested waits; normal assistant use does not block waiting for the network.
+
+The Groq clients use the configured request timeout and disable SDK-internal retries so the application owns retry policy. Transient connection/timeout, HTTP 408/409/429, and server errors receive a configurable, bounded exponential backoff (at most five retries); authentication failures are not retried. When already offline, the controller skips cloud calls and uses local eSpeak NG for an offline message. If connectivity drops during a cloud request, the controller checks again and gives the same local feedback. The next button press checks connectivity again, so recovery needs no restart or background service. Cloud transcription and reasoning do not work offline; there is no local-model fallback.
+
+The network settings in `.env` are:
+
+```ini
+GROQ_API_KEY=your_groq_api_key
+GROQ_TIMEOUT=30
+NETWORK_CONNECTION_TIMEOUT=15
+CONNECTIVITY_CHECK_TIMEOUT=2
+NETWORK_RETRY_COUNT=2
+NETWORK_RETRY_DELAY=0.5
+```
+
+`NETWORK_CONNECTION_TIMEOUT` is the maximum duration for an explicit connectivity wait. Each reachability probe is bounded by `CONNECTIVITY_CHECK_TIMEOUT`. The retry count is the number of retries after the initial Groq request. Do not put Wi-Fi passwords in `.env`; Raspberry Pi OS manages Wi-Fi separately.
+
 ### Windows simulation
 
 The hardware factory selects simulated microphone, button, speaker, and display on Windows. The simulated button uses Enter to start recording and another Enter to release it. When PyAudio is available, the simulated microphone may use the computer's default input device; otherwise, it produces silence, which the controller rejects without making a Groq request. The simulated speaker may use an available local playback backend or log the playback.
 
-To run the application, configure `.env` with a valid `GROQ_API_KEY`, install the Python requirements, and install eSpeak NG if you want audible TTS. Then run:
+To run the application, configure `.env` with a valid `GROQ_API_KEY`, install the Python requirements, and install eSpeak NG if you want audible TTS. Startup diagnostics will perform one short internet check but do not require a successful check to start. Then run:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
@@ -88,6 +127,7 @@ AI_PIN/
 │   ├── button.py                #    GPIO17 push-to-talk button
 │   ├── display.py               #    Optional SPI TFT display
 │   ├── camera.py                #    Optional camera (CSI/USB)
+│   ├── led.py                   #    Optional LED scaffold
 │   └── factory.py               #    Hardware factory (DI)
 │
 ├── ai/                          # 🧠 AI pipeline
@@ -98,24 +138,28 @@ AI_PIN/
 │   ├── pipeline.py              #    AI pipeline orchestrator
 │   └── wake_word.py             #    Wake-word detection (future)
 │
+├── assistant/                   # 🎙️ Main application controller
+│   └── controller.py            #    Button-driven recording and response loop
+│
 ├── simulation/                  # 🖥️ Simulated hardware (Windows dev)
 │   ├── sim_microphone.py        #    Simulated mic
 │   ├── sim_speaker.py           #    Simulated speaker
 │   ├── sim_button.py            #    Simulated button
-│   └── sim_display.py           #    Simulated display
+│   ├── sim_display.py           #    Simulated display
+│   ├── sim_camera.py            #    Simulated camera interface
+│   └── sim_led.py               #    Simulated LED
 │
 ├── backend/                     # ⚙️ Application logic
-│   ├── pipeline.py              #    Earlier pipeline scaffold
-│   ├── state.py                 #    Device state machine
-│   └── session.py               #    Session manager
-│
-├── assistant/                   # 🎙️ Main application controller
-│   └── controller.py            #    Button-driven recording and response loop
+│   ├── network_manager.py       #    Wi-Fi/internet status and diagnostics
+│   ├── pipeline.py              #    Earlier unused pipeline scaffold
+│   ├── state.py                 #    Earlier unused device state machine
+│   └── session.py               #    Earlier unused session manager
 │
 ├── network/                     # 🌐 Connectivity
-│   ├── wifi.py                  #    Wi-Fi management
+│   ├── wifi.py                  #    Read-only Wi-Fi status detection
+│   ├── retry.py                 #    Bounded transient Groq request retries
 │   ├── bluetooth.py             #    Bluetooth (future)
-│   └── api_client.py            #    Shared HTTP client
+│   └── api_client.py            #    Optional generic requests helper
 │
 ├── utils/                       # 🛠️ Shared utilities
 │   ├── logger.py                #    Logging setup
@@ -133,6 +177,7 @@ AI_PIN/
     ├── test_config.py           #    Configuration tests
     ├── test_pipeline.py         #    Backend pipeline tests
     ├── test_assistant.py        #    Integrated assistant tests
+    ├── test_network_manager.py  #    Offline connectivity and retry tests
     └── test_platform.py         #    Platform detection tests
 ```
 
@@ -197,7 +242,7 @@ The tests use mocked API clients and simulated hardware; they run without intern
 ### Prerequisites
 
 - Raspberry Pi Zero W with Raspberry Pi OS Lite (32-bit); the 40-pin header must be soldered before GPIO wiring
-- Python 3.9+
+- Python 3.9+ (the source uses postponed annotations for Python 3.9 compatibility)
 - INMP441 I2S microphone
 - MAX98357A I2S amplifier + speaker
 - Push-to-talk button on GPIO17
@@ -205,7 +250,7 @@ The tests use mocked API clients and simulated hardware; they run without intern
 ### Install
 
 ```bash
-sudo apt update && sudo apt install -y python3-pip python3-venv espeak-ng
+sudo apt update && sudo apt install -y python3-pip python3-venv python3-dev portaudio19-dev libasound2-dev espeak-ng
 git clone https://github.com/tanveersingh0902/AI_PIN.git
 cd AI_PIN
 python3 -m venv venv
@@ -218,11 +263,39 @@ pip install RPi.GPIO
 
 ```bash
 cp .env.example .env
-nano .env  # Set GROQ_API_KEY
+nano .env  # Set GROQ_API_KEY; Wi-Fi credentials are not stored here
 python3 main.py
 ```
 
-Enable and configure I2S/ALSA for the microphone and amplifier before using real audio hardware. **Hardware has not been assembled or physically tested.** The current Pi microphone/speaker drivers require working PyAudio/ALSA configuration. The Pi display driver is still a stub; this step does not implement the deferred SPI display.
+### Configure Raspberry Pi Wi-Fi
+
+Connect through Raspberry Pi OS's network configuration; VIHAAN does not modify Wi-Fi settings. Use the desktop Network Manager, or on Raspberry Pi OS Lite use `sudo raspi-config` and select the wireless LAN configuration. Set the correct WLAN country when prompted. On Raspberry Pi OS releases using NetworkManager, `nmcli device status` shows device state and `nmcli -f IN-USE,SSID dev wifi` lists visible networks. Do not paste passwords into source code, shell history, or this README.
+
+To join a normal network, configure its SSID and password in Raspberry Pi OS, ensure the access point offers 2.4 GHz Wi-Fi, then verify association with `iwgetid -r` or `ip link show wlan0`. Verify internet separately, for example with `curl -I --max-time 5 https://api.groq.com`; a Wi-Fi association does not guarantee internet access. Captive portals, firewalls, DNS failures, or blocked outbound connections can prevent Groq access.
+
+### OnePlus 9 Pro hotspot
+
+In the phone's Personal Hotspot settings, enable the hotspot and select the 2.4 GHz band (the Pi Zero W supports 2.4 GHz Wi-Fi). Choose a hotspot name and password on the phone, then add that network through Raspberry Pi OS's Wi-Fi configuration as above. Keep the hotspot password in the operating system's protected network settings, not in application source or logs. Menu names can vary by OxygenOS version.
+
+If offline, check the Pi's Wi-Fi association first, then confirm internet access independently. For Groq failures, confirm the Pi's clock and internet access, verify that `.env` contains a valid `GROQ_API_KEY`, and check the configured Groq models/account availability. Authentication failures are not retried; transient errors receive only the configured bounded retries. Local eSpeak NG and the assistant's offline message do not require internet.
+
+Enable and configure I2S/ALSA for the microphone and amplifier before using real audio hardware. The PyAudio installation may require compiling against PortAudio on ARMv6; package availability and build success must be verified on the target OS. `requests` is only used by the optional generic HTTP helper; `sounddevice` was removed because no active module uses it. **Hardware has not been assembled or physically tested.** The Pi display driver is still a stub; this step does not implement the deferred SPI display.
+
+### Physical hardware validation checklist
+
+- [ ] Confirm Raspberry Pi OS version, Python version, and successful installation of all required packages on the Pi Zero W.
+- [ ] Enable I2S and verify ALSA enumerates the INMP441 input and MAX98357A output.
+- [ ] Confirm microphone channel count, sample rate, PCM format, and sustained capture without overflows.
+- [ ] Verify push-to-talk GPIO pin mapping, pull-up wiring, press/release callbacks, and debounce across repeated presses.
+- [ ] Confirm captured WAV files are valid and removed after both successful and failed interactions.
+- [ ] Verify eSpeak NG is installed, produces a WAV, and does not play audio directly a second time.
+- [ ] Verify MAX98357A playback, volume, clipping/noise, interruption, and cleanup after playback errors.
+- [ ] Test Wi-Fi and internet diagnostics separately on a normal 2.4 GHz network and the OnePlus 9 Pro hotspot.
+- [ ] Test offline start, internet loss during a request, reconnection on a later press, and Groq authentication/rate-limit failures.
+- [ ] Confirm optional display failure does not stop audio, and check shutdown during capture, processing, and playback.
+- [ ] Measure peak RAM, CPU, and SD-card log growth during repeated interactions and a long push-to-talk hold.
+
+Only after these checks should hardware support be considered validated; Windows and mocks cannot substitute for them.
 
 ---
 
@@ -233,9 +306,10 @@ Enable and configure I2S/ALSA for the microphone and amplifier before using real
 | **Hardware Isolation** | `hardware/` defines interfaces; the factory selects real or simulated components |
 | **Cloud AI, Local TTS** | STT + LLM on Groq cloud; eSpeak NG runs locally |
 | **Single API Key** | One `GROQ_API_KEY` for both Whisper STT and LLM |
-| **Memory-Conscious** | 384 MB soft cap; capped conversation history (10 turns) |
+| **Memory-Conscious** | 384 MB is a target budget, not an enforced process limit; history is capped at 10 turns |
 | **Dependency Injection** | HardwareFactory auto-selects real vs simulated drivers |
 | **Config-Driven** | All tunables in `.env` — no hardcoded secrets |
+| **Network Resilience** | Read-only connectivity checks and bounded Groq retries; local offline feedback |
 | **Fully Testable** | Tests run offline with mocked APIs and simulated hardware |
 
 ---
@@ -261,12 +335,12 @@ The Raspberry Pi Zero W has:
 - **Storage**: microSD
 - **Connectivity**: Wi-Fi 802.11n, Bluetooth 4.1
 
-The software runs within **~384 MB RAM** by:
+The software is designed for a **~384 MB working budget**, but the application does not currently enforce a memory cap. It reduces memory use by:
 1. Offloading STT + LLM to Groq cloud API
 2. Using eSpeak NG (< 5 MB) for local TTS
 3. No PyTorch, TensorFlow, or local AI models
 4. Capping conversation history at 10 turns
-5. Lightweight Groq SDK (~2 MB installed)
+5. Streaming WAV playback in chunks on the Pi hardware path
 
 ---
 

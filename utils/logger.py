@@ -55,8 +55,10 @@ def setup_logging(level: str = "INFO", log_file: str = "vihaan.log") -> None:
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(formatter)
         handlers.append(file_handler)
-    except Exception:
-        pass  # File logging is best-effort
+    except (OSError, ValueError) as error:
+        logging.getLogger(__name__).warning(
+            "File logging unavailable; using console output: %s", error
+        )
 
     # ── Root Logger ────────────────────────────────────────────
     logging.basicConfig(level=log_level, handlers=handlers, force=True)

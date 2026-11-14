@@ -8,10 +8,12 @@ Run with:  pytest tests/test_hardware.py -v
 """
 
 import os
+import sys
 import time
 import wave
 import threading
 import tempfile
+from types import SimpleNamespace
 import pytest
 
 from utils.platform_detect import Platform
@@ -61,6 +63,23 @@ class TestInterfaces:
         assert hasattr(CameraInterface, "is_available")
         assert hasattr(CameraInterface, "capture_image")
         assert hasattr(CameraInterface, "cleanup")
+
+    def test_sim_camera_implements_camera_interface(self):
+        from hardware.camera import CameraInterface
+        from simulation.sim_camera import SimCamera
+
+        camera = SimCamera()
+        assert isinstance(camera, CameraInterface)
+        assert camera.capture_image("unused.jpg") == ""
+
+
+def test_helpers_import_without_linux_resource_module(monkeypatch):
+    import importlib
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    helpers = importlib.import_module("utils.helpers")
+    assert helpers.get_memory_usage_mb() == 0.0
 
     def test_display_status_enum(self):
         assert DisplayStatus.IDLE.value == "IDLE"
@@ -201,6 +220,59 @@ class TestSimSpeaker:
         spk = self._make_speaker()
         spk.stop_playback()  # Should not crash
         spk.cleanup()
+
+
+def test_pi_speaker_worker_reports_failure_and_closes_stream(tmp_path, monkeypatch):
+    from hardware.speaker import PiSpeaker
+
+    class FakeStream:
+        def __init__(self):
+            self.closed = threading.Event()
+            self.stopped = False
+
+        def write(self, _data):
+            raise OSError("simulated device failure")
+
+        def stop_stream(self):
+            self.stopped = True
+
+        def close(self):
+            self.closed.set()
+
+    class FakeAudio:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def get_format_from_width(self, _width):
+            return 1
+
+        def open(self, **_kwargs):
+            return self.stream
+
+        def terminate(self):
+            pass
+
+    stream = FakeStream()
+    speaker = PiSpeaker()
+    speaker._audio = FakeAudio(stream)
+    monkeypatch.setitem(sys.modules, "pyaudio", SimpleNamespace())
+    wav_path = tmp_path / "failure.wav"
+    with wave.open(str(wav_path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(16000)
+        wav_file.writeframes(b"\x01\x00" * 16)
+
+    speaker.play_wav(str(wav_path))
+
+    assert stream.closed.wait(timeout=2)
+    if speaker._play_thread is not None:
+        speaker._play_thread.join(timeout=2)
+    assert stream.stopped
+    assert speaker.last_playback_error is not None
+    assert "OSError" in speaker.last_playback_error
+    assert speaker.is_playing is False
+    speaker.cleanup()
 
 
 # ═══════════════════════════════════════════════════════════════

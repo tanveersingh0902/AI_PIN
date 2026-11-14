@@ -11,7 +11,6 @@ hardware without hard-coding platform checks everywhere.
 """
 
 import platform
-import os
 from enum import Enum
 
 

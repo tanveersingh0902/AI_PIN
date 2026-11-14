@@ -4,8 +4,10 @@ utils.helpers — Miscellaneous Helpers
 Small utility functions shared across modules.
 """
 
-import resource
+import logging
 import sys
+
+logger = logging.getLogger(__name__)
 
 
 def clamp(value: float, low: float, high: float) -> float:
@@ -27,9 +29,9 @@ def get_memory_usage_mb() -> float:
     """
     try:
         if sys.platform == "linux":
-            import resource  # noqa: F811
+            import resource
             # ru_maxrss is in KB on Linux
             return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
-    except Exception:
-        pass
+    except (ImportError, OSError, AttributeError) as error:
+        logger.warning("Could not read process memory usage: %s", error)
     return 0.0

@@ -7,10 +7,10 @@ the correct hardware implementations:
   - Windows / Linux (dev) → simulated hardware from simulation/
   - Raspberry Pi           → real hardware from hardware/
 
-Each real-hardware component is wrapped in a try/except so that
-a missing driver (e.g., RPi.GPIO not installed) falls back to
-the simulation gracefully — the system never crashes because of
-absent hardware.
+Pi drivers are imported lazily. Constructor/import failures for
+required devices can fall back to simulation, while runtime hardware
+errors are surfaced by the component/controller. Optional display or
+camera initialization failures do not prevent assistant startup.
 
 Usage
 -----
@@ -22,25 +22,15 @@ Usage
     kit.cleanup()
 """
 
+from __future__ import annotations
+
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from utils.platform_detect import detect_platform, Platform
 
 logger = logging.getLogger(__name__)
-
-
-# ── Lazy imports (avoid circular / missing-lib issues) ─────────
-
-def _import_interfaces():
-    from hardware.microphone import MicrophoneInterface
-    from hardware.speaker import SpeakerInterface
-    from hardware.button import ButtonInterface
-    from hardware.display import DisplayInterface
-    from hardware.camera import CameraInterface
-    return (MicrophoneInterface, SpeakerInterface, ButtonInterface,
-            DisplayInterface, CameraInterface)
 
 
 # ── Hardware Kit ───────────────────────────────────────────────
@@ -150,7 +140,7 @@ class HardwareFactory:
                 channels=channels,
                 chunk_size=chunk_size,
             )
-            logger.info("  ✓ Microphone: PiMicrophone (I2S)")
+            logger.info("  ✓ Microphone driver: PiMicrophone (I2S; opened on recording)")
         except Exception as e:
             logger.warning(f"  ✗ PiMicrophone failed ({e}), using SimMicrophone.")
             from simulation.sim_microphone import SimMicrophone
@@ -160,7 +150,7 @@ class HardwareFactory:
         try:
             from hardware.speaker import PiSpeaker
             spk = PiSpeaker(chunk_size=chunk_size)
-            logger.info("  ✓ Speaker: PiSpeaker (I2S)")
+            logger.info("  ✓ Speaker driver: PiSpeaker (I2S; opened on playback)")
         except Exception as e:
             logger.warning(f"  ✗ PiSpeaker failed ({e}), using SimSpeaker.")
             from simulation.sim_speaker import SimSpeaker
@@ -170,7 +160,9 @@ class HardwareFactory:
         try:
             from hardware.button import PiButton
             btn = PiButton(gpio_pin=button_pin)
-            logger.info(f"  ✓ Button: PiButton (GPIO{button_pin})")
+            logger.info(
+                f"  ✓ Button driver: PiButton (GPIO{button_pin}; setup deferred)"
+            )
         except Exception as e:
             logger.warning(f"  ✗ PiButton failed ({e}), using SimButton.")
             from simulation.sim_button import SimButton

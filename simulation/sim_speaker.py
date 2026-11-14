@@ -12,6 +12,8 @@ Behaviour:
 Implements hardware.speaker.SpeakerInterface.
 """
 
+from __future__ import annotations
+
 import wave
 import logging
 import threading
@@ -50,6 +52,7 @@ class SimSpeaker(SpeakerInterface):
         self._playing = False
         self._play_thread: threading.Thread | None = None
         self._audio = None
+        self.last_playback_error: str | None = None
 
         if _HAS_PYAUDIO:
             try:
@@ -71,15 +74,25 @@ class SimSpeaker(SpeakerInterface):
     def play_wav(self, filepath: str) -> None:
         path = Path(filepath)
         if not path.is_file():
+            self.last_playback_error = "WAV file not found."
             logger.error(f"SimSpeaker: WAV file not found: {filepath}")
             return
 
         self.stop_playback()
+        if self._play_thread and self._play_thread.is_alive():
+            self.last_playback_error = "Previous playback did not stop."
+            raise RuntimeError(self.last_playback_error)
+        self.last_playback_error = None
         self._playing = True
         self._play_thread = threading.Thread(
             target=self._play_wav_worker, args=(str(path),), daemon=True
         )
-        self._play_thread.start()
+        try:
+            self._play_thread.start()
+        except RuntimeError as error:
+            self._playing = False
+            self.last_playback_error = f"{type(error).__name__}: {error}"
+            raise
 
     def _play_wav_worker(self, filepath: str):
         try:
@@ -91,38 +104,54 @@ class SimSpeaker(SpeakerInterface):
             else:
                 logger.info(f"SimSpeaker ▶ [LOG ONLY] playing '{filepath}'")
         except Exception as e:
+            self.last_playback_error = f"{type(e).__name__}: {e}"
             logger.error(f"SimSpeaker playback error: {e}")
         finally:
             self._playing = False
 
     def _play_wav_pyaudio(self, filepath: str):
-        with wave.open(filepath, "rb") as wf:
-            stream = self._audio.open(
-                format=self._audio.get_format_from_width(wf.getsampwidth()),
-                channels=wf.getnchannels(),
-                rate=wf.getframerate(),
-                output=True,
-            )
-            logger.info(f"SimSpeaker ▶ playing '{filepath}' (PyAudio)")
-            data = wf.readframes(1024)
-            while data and self._playing:
-                stream.write(data)
+        stream = None
+        try:
+            with wave.open(filepath, "rb") as wf:
+                stream = self._audio.open(
+                    format=self._audio.get_format_from_width(wf.getsampwidth()),
+                    channels=wf.getnchannels(),
+                    rate=wf.getframerate(),
+                    output=True,
+                )
+                logger.info(f"SimSpeaker ▶ playing '{filepath}' (PyAudio)")
                 data = wf.readframes(1024)
-            stream.stop_stream()
-            stream.close()
+                while data and self._playing:
+                    stream.write(data)
+                    data = wf.readframes(1024)
+        finally:
+            if stream is not None:
+                try:
+                    stream.stop_stream()
+                finally:
+                    stream.close()
 
     # ── Raw audio playback ────────────────────────────────────
 
     def play_audio(self, audio_data: bytes, sample_rate: int = 16000,
                    channels: int = 1) -> None:
         self.stop_playback()
+        if self._play_thread and self._play_thread.is_alive():
+            self.last_playback_error = "Previous playback did not stop."
+            raise RuntimeError(self.last_playback_error)
+        self.last_playback_error = None
         self._playing = True
         self._play_thread = threading.Thread(
             target=self._play_raw_worker,
             args=(audio_data, sample_rate, channels),
             daemon=True,
         )
-        self._play_thread.start()
+        try:
+            self._play_thread.start()
+        except RuntimeError as error:
+            self._playing = False
+            self.last_playback_error = f"{type(error).__name__}: {error}"
+            raise
 
     def _play_raw_worker(self, audio_data: bytes, sample_rate: int,
                          channels: int):
@@ -147,6 +176,7 @@ class SimSpeaker(SpeakerInterface):
                     f"SimSpeaker ▶ [LOG ONLY] {len(audio_data)} bytes raw audio"
                 )
         except Exception as e:
+            self.last_playback_error = f"{type(e).__name__}: {e}"
             logger.error(f"SimSpeaker raw playback error: {e}")
         finally:
             self._playing = False
@@ -155,13 +185,20 @@ class SimSpeaker(SpeakerInterface):
 
     def stop_playback(self) -> None:
         self._playing = False
-        if self._play_thread and self._play_thread.is_alive():
-            self._play_thread.join(timeout=2.0)
-            self._play_thread = None
+        thread = self._play_thread
+        if thread and thread.is_alive():
+            thread.join(timeout=2.0)
+            if thread.is_alive():
+                logger.error("SimSpeaker playback thread did not stop in time.")
+                return
+        self._play_thread = None
         logger.debug("SimSpeaker: playback stopped.")
 
     def cleanup(self) -> None:
         self.stop_playback()
+        if self._play_thread and self._play_thread.is_alive():
+            logger.error("SimSpeaker resources retained while playback is active.")
+            return
         if self._audio:
             try:
                 self._audio.terminate()

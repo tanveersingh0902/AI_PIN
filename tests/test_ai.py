@@ -15,7 +15,7 @@ Run with:  pytest tests/test_ai.py -v
 import os
 import tempfile
 import pytest
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, MagicMock
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -102,7 +102,7 @@ class TestSpeechToText:
 
     def _make_stt(self):
         from ai.speech_to_text import SpeechToText
-        stt = SpeechToText(api_key="test-key")
+        stt = SpeechToText(api_key="test-key", retry_count=0)
         # Inject a mock client
         stt._client = MagicMock()
         return stt
@@ -174,6 +174,21 @@ class TestSpeechToText:
         result = stt.transcribe_bytes(b"\x00" * 100)
         assert result == ""
 
+    def test_transcribe_bytes_retries_transient_failure(self):
+        from ai.speech_to_text import SpeechToText
+
+        stt = SpeechToText(
+            api_key="test-key", retry_count=1, retry_delay=0
+        )
+        stt._client = MagicMock()
+        stt._client.audio.transcriptions.create.side_effect = [
+            ConnectionError("temporary network failure"),
+            "Recovered transcription",
+        ]
+
+        assert stt.transcribe_bytes(b"\x00" * 100) == "Recovered transcription"
+        assert stt._client.audio.transcriptions.create.call_count == 2
+
 
 # ═══════════════════════════════════════════════════════════════
 #  4. LLM TESTS (MOCKED)
@@ -184,7 +199,7 @@ class TestLLMClient:
 
     def _make_llm(self):
         from ai.llm import LLMClient
-        llm = LLMClient(api_key="test-key")
+        llm = LLMClient(api_key="test-key", retry_count=0)
         llm._client = MagicMock()
         return llm
 
@@ -238,6 +253,25 @@ class TestLLMClient:
 
         result = llm.query("Tell me a joke.")
         assert result == ""
+
+    def test_query_retries_rate_limit(self, monkeypatch):
+        from ai.llm import LLMClient
+
+        class RateLimitError(Exception):
+            status_code = 429
+
+        monkeypatch.setattr("network.retry.time.sleep", lambda _delay: None)
+        llm = LLMClient(api_key="test-key", retry_count=1, retry_delay=0)
+        llm._client = MagicMock()
+        completion = MagicMock()
+        completion.choices[0].message.content = "Ready."
+        llm._client.chat.completions.create.side_effect = [
+            RateLimitError("retry later"),
+            completion,
+        ]
+
+        assert llm.query("Tell me a joke.") == "Ready."
+        assert llm._client.chat.completions.create.call_count == 2
 
     def test_default_system_prompt(self):
         from ai.llm import LLMClient
@@ -455,7 +489,7 @@ class TestAIPipeline:
 
     @patch("ai.text_to_speech.shutil.which", return_value="/usr/bin/espeak-ng")
     @patch("ai.text_to_speech.subprocess.run")
-    def test_full_pipeline_success(self, mock_run, mock_which):
+    def test_full_pipeline_success(self, mock_run, mock_which, caplog):
         mock_run.return_value = MagicMock(returncode=0, stderr="")
         pipeline = self._make_pipeline()
         self._setup_success_mocks(pipeline)
@@ -470,6 +504,13 @@ class TestAIPipeline:
             assert result.response == "Python is a programming language."
             assert result.spoken is True
             assert result.error is None
+            messages = pipeline.llm._client.chat.completions.create.call_args.kwargs[
+                "messages"
+            ]
+            assert [message["role"] for message in messages] == ["system", "user"]
+            assert messages[-1]["content"] == "What is Python?"
+            assert "What is Python?" not in caplog.text
+            assert "Python is a programming language." not in caplog.text
         finally:
             os.unlink(path)
 
@@ -504,6 +545,7 @@ class TestAIPipeline:
             assert result.response == ""
             assert result.error is not None
             assert "LLM" in result.error
+            assert pipeline.conversation.get_history() == []
         finally:
             os.unlink(path)
 
@@ -558,6 +600,14 @@ class TestAIPipeline:
             assert history[0]["role"] == "user"
             assert history[0]["content"] == "What is Python?"
             assert history[1]["role"] == "assistant"
+            sent_messages = pipeline.llm._client.chat.completions.create.call_args.kwargs[
+                "messages"
+            ]
+            assert [
+                message["content"]
+                for message in sent_messages
+                if message["role"] == "user"
+            ] == ["What is Python?"]
         finally:
             os.unlink(path)
 
@@ -578,3 +628,24 @@ class TestAIPipeline:
         result = pipeline.process_audio_bytes(b"\x00" * 100)
         assert result.transcription == "What is Python?"
         assert result.response == "Python is a programming language."
+        sent_messages = pipeline.llm._client.chat.completions.create.call_args.kwargs[
+            "messages"
+        ]
+        assert [
+            message["content"]
+            for message in sent_messages
+            if message["role"] == "user"
+        ] == ["What is Python?"]
+
+
+def test_api_error_logs_do_not_include_error_message(caplog):
+    from ai.llm import LLMClient
+
+    client = LLMClient(api_key="mock-secret")
+    client._client = MagicMock()
+    client._client.chat.completions.create.side_effect = RuntimeError(
+        "credential mock-secret must not be logged"
+    )
+
+    assert client.query("hello") == ""
+    assert "mock-secret" not in caplog.text

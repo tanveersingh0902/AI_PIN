@@ -14,6 +14,8 @@ Provides three ways to trigger the button:
 Implements hardware.button.ButtonInterface.
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 from typing import Callable, Optional

@@ -92,6 +92,8 @@ class PiCamera(CameraInterface):
             return False
 
     def capture_image(self, filepath: str) -> str:
+        cam = None
+        started = False
         try:
             from picamera2 import Picamera2
 
@@ -101,9 +103,8 @@ class PiCamera(CameraInterface):
             )
             cam.configure(config)
             cam.start()
+            started = True
             cam.capture_file(filepath)
-            cam.stop()
-            cam.close()
             logger.info(f"PiCamera: image saved to {filepath}")
             return filepath
         except ImportError:
@@ -112,6 +113,17 @@ class PiCamera(CameraInterface):
         except Exception as e:
             logger.error(f"PiCamera capture failed: {e}")
             return ""
+        finally:
+            if cam is not None:
+                if started:
+                    try:
+                        cam.stop()
+                    except Exception:
+                        logger.warning("PiCamera stop failed during cleanup.", exc_info=True)
+                try:
+                    cam.close()
+                except Exception:
+                    logger.warning("PiCamera close failed during cleanup.", exc_info=True)
 
     def cleanup(self) -> None:
         # No persistent resources — camera is opened/closed per capture

@@ -11,6 +11,8 @@ Pi-specific dependencies (lazy-imported):
   - pyaudio
 """
 
+from __future__ import annotations
+
 import wave
 import logging
 import threading
@@ -101,6 +103,7 @@ class PiSpeaker(SpeakerInterface):
         self._audio = None
         self._playing = False
         self._play_thread: threading.Thread | None = None
+        self.last_playback_error: str | None = None
 
     @property
     def is_playing(self) -> bool:
@@ -114,17 +117,28 @@ class PiSpeaker(SpeakerInterface):
     def play_wav(self, filepath: str) -> None:
         path = Path(filepath)
         if not path.is_file():
-            logger.error(f"WAV file not found: {filepath}")
+            self.last_playback_error = "WAV file not found."
+            logger.error("WAV file not found: %s", filepath)
             return
 
         self.stop_playback()
+        if self._play_thread and self._play_thread.is_alive():
+            self.last_playback_error = "Previous playback did not stop."
+            raise RuntimeError(self.last_playback_error)
+        self.last_playback_error = None
         self._playing = True
         self._play_thread = threading.Thread(
             target=self._play_wav_worker, args=(str(path),), daemon=True
         )
-        self._play_thread.start()
+        try:
+            self._play_thread.start()
+        except RuntimeError as error:
+            self._playing = False
+            self.last_playback_error = f"{type(error).__name__}: {error}"
+            raise
 
     def _play_wav_worker(self, filepath: str):
+        stream = None
         try:
             import pyaudio
             self._ensure_audio()
@@ -143,27 +157,44 @@ class PiSpeaker(SpeakerInterface):
                 while data and self._playing:
                     stream.write(data)
                     data = wf.readframes(self._chunk_size)
-
-                stream.stop_stream()
-                stream.close()
         except Exception as e:
+            self.last_playback_error = f"{type(e).__name__}: {e}"
             logger.error(f"PiSpeaker playback error: {e}")
         finally:
+            if stream is not None:
+                try:
+                    stream.stop_stream()
+                except Exception:
+                    logger.debug("PiSpeaker stream stop failed.", exc_info=True)
+                try:
+                    stream.close()
+                except Exception:
+                    logger.warning("PiSpeaker stream close failed.", exc_info=True)
             self._playing = False
 
     def play_audio(self, audio_data: bytes, sample_rate: int = 16000,
                    channels: int = 1) -> None:
         self.stop_playback()
+        if self._play_thread and self._play_thread.is_alive():
+            self.last_playback_error = "Previous playback did not stop."
+            raise RuntimeError(self.last_playback_error)
+        self.last_playback_error = None
         self._playing = True
         self._play_thread = threading.Thread(
             target=self._play_raw_worker,
             args=(audio_data, sample_rate, channels),
             daemon=True,
         )
-        self._play_thread.start()
+        try:
+            self._play_thread.start()
+        except RuntimeError as error:
+            self._playing = False
+            self.last_playback_error = f"{type(error).__name__}: {error}"
+            raise
 
     def _play_raw_worker(self, audio_data: bytes, sample_rate: int,
                          channels: int):
+        stream = None
         try:
             import pyaudio
             self._ensure_audio()
@@ -183,23 +214,37 @@ class PiSpeaker(SpeakerInterface):
                 chunk = audio_data[offset:offset + chunk_bytes]
                 stream.write(chunk)
                 offset += chunk_bytes
-
-            stream.stop_stream()
-            stream.close()
         except Exception as e:
+            self.last_playback_error = f"{type(e).__name__}: {e}"
             logger.error(f"PiSpeaker raw playback error: {e}")
         finally:
+            if stream is not None:
+                try:
+                    stream.stop_stream()
+                except Exception:
+                    logger.debug("PiSpeaker stream stop failed.", exc_info=True)
+                try:
+                    stream.close()
+                except Exception:
+                    logger.warning("PiSpeaker stream close failed.", exc_info=True)
             self._playing = False
 
     def stop_playback(self) -> None:
         self._playing = False
-        if self._play_thread and self._play_thread.is_alive():
-            self._play_thread.join(timeout=2.0)
-            self._play_thread = None
+        thread = self._play_thread
+        if thread and thread.is_alive():
+            thread.join(timeout=2.0)
+            if thread.is_alive():
+                logger.error("PiSpeaker playback thread did not stop in time.")
+                return
+        self._play_thread = None
         logger.debug("PiSpeaker: playback stopped.")
 
     def cleanup(self) -> None:
         self.stop_playback()
+        if self._play_thread and self._play_thread.is_alive():
+            logger.error("PiSpeaker resources retained while playback is active.")
+            return
         if self._audio:
             try:
                 self._audio.terminate()

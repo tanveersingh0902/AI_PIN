@@ -9,13 +9,12 @@ Implements hardware.camera.BaseCamera interface.
 """
 
 import logging
-import os
-from hardware.camera import BaseCamera
+from hardware.camera import CameraInterface
 
 logger = logging.getLogger(__name__)
 
 
-class SimCamera(BaseCamera):
+class SimCamera(CameraInterface):
     """
     Simulated camera for Windows development.
 
@@ -39,9 +38,9 @@ class SimCamera(BaseCamera):
         logger.info("SimCamera: camera ready (simulated).")
 
     def capture_image(self, filepath: str) -> str:
-        logger.info(f"📷 SimCamera: captured image → '{filepath}' (simulated).")
-        # In static mode, we just log.  In webcam mode, use OpenCV.
-        return filepath
+        del filepath
+        logger.warning("SimCamera image capture is not implemented.")
+        return ""
 
     def capture_frame(self) -> bytes:
         logger.debug("SimCamera: returning empty frame (simulated).")

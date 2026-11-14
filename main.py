@@ -1,5 +1,7 @@
 """VIHAAN AI PIN application entry point."""
 
+from __future__ import annotations
+
 import logging
 import signal
 
@@ -9,6 +11,7 @@ from ai.pipeline import AIPipeline
 from ai.speech_to_text import SpeechToText
 from ai.text_to_speech import TextToSpeech
 from assistant.controller import AssistantController
+from backend.network_manager import NetworkManager
 from config import CACHE_DIR, settings
 from hardware.factory import HardwareFactory, HardwareKit
 from utils.logger import setup_logging
@@ -26,14 +29,23 @@ def main() -> int:
     platform = detect_platform()
     logger.info("Platform detected: %s", platform.value)
     logger.info("%s v%s", settings.PROJECT_NAME, settings.VERSION)
+    if not settings.GROQ_API_KEY:
+        logger.error("GROQ_API_KEY is missing. Set it in the environment or .env.")
+        return 1
 
     signal.signal(signal.SIGINT, _handle_shutdown_signal)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _handle_shutdown_signal)
 
-    if not settings.GROQ_API_KEY:
-        logger.error("GROQ_API_KEY is missing. Set it in the environment or .env.")
-        return 1
+    network_manager = NetworkManager(
+        api_key=settings.GROQ_API_KEY,
+        connectivity_check_timeout=settings.CONNECTIVITY_CHECK_TIMEOUT,
+        connection_timeout=settings.NETWORK_CONNECTION_TIMEOUT,
+    )
+    logger.info(
+        "Network diagnostics:\n%s",
+        network_manager.diagnostics(),
+    )
 
     hardware: HardwareKit | None = None
     assistant: AssistantController | None = None
@@ -52,6 +64,8 @@ def main() -> int:
             api_key=settings.GROQ_API_KEY,
             model="whisper-large-v3-turbo",
             timeout=settings.GROQ_TIMEOUT,
+            retry_count=settings.NETWORK_RETRY_COUNT,
+            retry_delay=settings.NETWORK_RETRY_DELAY,
         )
         llm = LLMClient(
             api_key=settings.GROQ_API_KEY,
@@ -60,6 +74,8 @@ def main() -> int:
             temperature=settings.LLM_TEMPERATURE,
             timeout=settings.GROQ_TIMEOUT,
             system_prompt=settings.LLM_SYSTEM_PROMPT,
+            retry_count=settings.NETWORK_RETRY_COUNT,
+            retry_delay=settings.NETWORK_RETRY_DELAY,
         )
         tts = TextToSpeech(
             executable=settings.ESPEAK_EXECUTABLE,
@@ -76,6 +92,7 @@ def main() -> int:
             ai_pipeline=ai_pipeline,
             tts=tts,
             recording_dir=CACHE_DIR,
+            network_manager=network_manager,
         )
         return 0 if assistant.run() else 1
     except KeyboardInterrupt:
