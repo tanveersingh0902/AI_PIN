@@ -59,6 +59,7 @@ class Settings:
     VERSION: str = "0.2.0"
     DEBUG: bool = _env_bool("DEBUG", False)
     LOG_LEVEL: str = _env("LOG_LEVEL", "INFO")
+    HARDWARE_MODE: str = _env("HARDWARE_MODE", "auto").strip().lower()
 
     # ── Groq API (shared key for STT + LLM) ───────────────────
     GROQ_API_KEY: str = _env("GROQ_API_KEY")

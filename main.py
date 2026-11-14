@@ -58,6 +58,7 @@ def main() -> int:
             button_pin=settings.BUTTON_GPIO_PIN,
             enable_display=True,
             enable_camera=False,
+            hardware_mode=settings.HARDWARE_MODE,
         )
 
         stt = SpeechToText(

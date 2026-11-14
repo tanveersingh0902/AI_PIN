@@ -83,7 +83,8 @@ class HardwareFactory:
                chunk_size: int = 1024,
                button_pin: int = 17,
                enable_display: bool = True,
-               enable_camera: bool = False) -> HardwareKit:
+               enable_camera: bool = False,
+               hardware_mode: str = "auto") -> HardwareKit:
         """
         Build a HardwareKit with the right implementations.
 
@@ -103,6 +104,9 @@ class HardwareFactory:
             Whether to initialise the display (optional).
         enable_camera : bool
             Whether to initialise the camera (optional, off by default).
+        hardware_mode : str
+            "auto" selects real Pi hardware only on a Raspberry Pi;
+            "simulation" forces simulated components on every platform.
 
         Returns
         -------
@@ -112,9 +116,19 @@ class HardwareFactory:
         if platform is None:
             platform = detect_platform()
 
-        logger.info(f"HardwareFactory: creating kit for {platform.value}")
+        hardware_mode = hardware_mode.strip().lower()
+        if hardware_mode not in {"auto", "simulation"}:
+            raise ValueError(
+                "hardware_mode must be either 'auto' or 'simulation'."
+            )
 
-        if platform == Platform.RASPBERRY_PI:
+        logger.info(
+            "HardwareFactory: creating kit for %s (mode=%s)",
+            platform.value,
+            hardware_mode,
+        )
+
+        if platform == Platform.RASPBERRY_PI and hardware_mode == "auto":
             return HardwareFactory._create_pi(
                 platform, sample_rate, channels, chunk_size,
                 button_pin, enable_display, enable_camera,

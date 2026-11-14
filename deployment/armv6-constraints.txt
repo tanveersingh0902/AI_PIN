@@ -1,0 +1,4 @@
+# Avoid pydantic-core's Rust extension on the original ARMv6 Zero W.
+# Groq's SDK dependency metadata permits Pydantic v1; validate the
+# Pydantic source build and Groq import on the target before deployment.
+pydantic<2

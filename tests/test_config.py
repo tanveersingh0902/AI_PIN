@@ -13,6 +13,7 @@ def test_default_settings():
     s = Settings()
     assert s.PROJECT_NAME == "VIHAAN AI PIN"
     assert s.LOG_LEVEL == "INFO"
+    assert s.HARDWARE_MODE == "auto"
     assert s.LLM_MODEL == "openai/gpt-oss-120b"
     assert s.STT_MODEL == "whisper-large-v3-turbo"
     assert s.ESPEAK_EXECUTABLE == "espeak-ng"

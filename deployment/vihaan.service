@@ -1,0 +1,25 @@
+[Unit]
+Description=VIHAAN AI PIN voice assistant
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=vihaan
+Group=vihaan
+WorkingDirectory=/opt/vihaan/AI_PIN
+EnvironmentFile=/etc/vihaan/vihaan.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/vihaan/venv/bin/python -u /opt/vihaan/AI_PIN/main.py
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/vihaan/AI_PIN/data/cache /opt/vihaan/AI_PIN/data/logs
+
+[Install]
+WantedBy=multi-user.target

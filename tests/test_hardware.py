@@ -413,6 +413,52 @@ class TestHardwareFactory:
         assert kit.button is not None
         kit.cleanup()
 
+    def test_pi_can_force_simulation_without_initializing_pi_drivers(
+        self, monkeypatch
+    ):
+        from hardware.factory import HardwareFactory
+        from simulation import sim_microphone, sim_speaker
+        from simulation.sim_button import SimButton
+        from simulation.sim_microphone import SimMicrophone
+        from simulation.sim_speaker import SimSpeaker
+
+        monkeypatch.setattr(sim_microphone, "_HAS_PYAUDIO", False)
+        monkeypatch.setattr(sim_microphone, "_pa", None, raising=False)
+        monkeypatch.setattr(sim_speaker, "_HAS_PYAUDIO", False)
+        monkeypatch.setattr(sim_speaker, "_HAS_WINSOUND", False)
+        monkeypatch.setattr(
+            HardwareFactory,
+            "_create_pi",
+            staticmethod(
+                lambda *_args, **_kwargs: pytest.fail(
+                    "Pi drivers must not initialize in simulation mode."
+                )
+            ),
+        )
+
+        kit = HardwareFactory.create(
+            platform=Platform.RASPBERRY_PI,
+            hardware_mode="simulation",
+            enable_display=False,
+        )
+        try:
+            assert kit.platform == Platform.RASPBERRY_PI
+            assert isinstance(kit.microphone, SimMicrophone)
+            assert isinstance(kit.speaker, SimSpeaker)
+            assert isinstance(kit.button, SimButton)
+            assert kit.display is None
+        finally:
+            kit.cleanup()
+
+    def test_invalid_hardware_mode_is_rejected(self):
+        from hardware.factory import HardwareFactory
+
+        with pytest.raises(ValueError, match="hardware_mode"):
+            HardwareFactory.create(
+                platform=Platform.RASPBERRY_PI,
+                hardware_mode="unknown",
+            )
+
     def test_sim_kit_has_display(self):
         from hardware.factory import HardwareFactory
         kit = HardwareFactory.create(

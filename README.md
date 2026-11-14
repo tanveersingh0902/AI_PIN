@@ -171,6 +171,12 @@ AI_PIN/
 │   ├── cache/                   #    Temporary cache
 │   └── models/                  #    Reserved; no local AI models are used
 │
+├── deployment/                  # 🍓 Pi Zero W deployment preparation
+│   ├── README.md                #    ARMv6 preflight, setup, operation, checklist
+│   ├── requirements-pi-simulation.txt
+│   ├── armv6-constraints.txt    #    Pydantic v1 compatibility profile
+│   └── vihaan.service          #    Optional; not enabled automatically
+│
 └── tests/                       # 🧪 Offline unit tests
     ├── test_ai.py               #    AI pipeline tests (mocked)
     ├── test_hardware.py         #    Hardware abstraction tests
@@ -178,6 +184,7 @@ AI_PIN/
     ├── test_pipeline.py         #    Backend pipeline tests
     ├── test_assistant.py        #    Integrated assistant tests
     ├── test_network_manager.py  #    Offline connectivity and retry tests
+    ├── test_deployment.py       #    Static Pi deployment checks
     └── test_platform.py         #    Platform detection tests
 ```
 
@@ -237,65 +244,25 @@ The tests use mocked API clients and simulated hardware; they run without intern
 
 ---
 
-## 🍓 Deployment (Raspberry Pi Zero W)
+## Step 7: Raspberry Pi Zero W deployment preparation
 
-### Prerequisites
+The original Zero W uses an ARMv6 CPU. Before installing anything, verify the
+actual board, OS release, word size, architecture, and Python version on the
+device. `HARDWARE_MODE=simulation` supports an SSH-only start without
+initializing GPIO or I2S drivers. The Pi simulation dependency profile omits
+PyAudio/PortAudio; its microphone is silent and its speaker is log-only.
 
-- Raspberry Pi Zero W with Raspberry Pi OS Lite (32-bit); the 40-pin header must be soldered before GPIO wiring
-- Python 3.9+ (the source uses postponed annotations for Python 3.9 compatibility)
-- INMP441 I2S microphone
-- MAX98357A I2S amplifier + speaker
-- Push-to-talk button on GPIO17
+Follow the deployment guide for OS selection, ARMv6 dependency caveats, secure
+Groq configuration, 2.4 GHz Wi-Fi and OnePlus hotspot setup, eSpeak NG,
+manual tests, and the optional manual-first systemd service:
 
-### Install
+**[Raspberry Pi Zero W deployment guide](deployment/README.md)**
 
-```bash
-sudo apt update && sudo apt install -y python3-pip python3-venv python3-dev portaudio19-dev libasound2-dev espeak-ng
-git clone https://github.com/tanveersingh0902/AI_PIN.git
-cd AI_PIN
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-pip install RPi.GPIO
-```
-
-### Configure and run
-
-```bash
-cp .env.example .env
-nano .env  # Set GROQ_API_KEY; Wi-Fi credentials are not stored here
-python3 main.py
-```
-
-### Configure Raspberry Pi Wi-Fi
-
-Connect through Raspberry Pi OS's network configuration; VIHAAN does not modify Wi-Fi settings. Use the desktop Network Manager, or on Raspberry Pi OS Lite use `sudo raspi-config` and select the wireless LAN configuration. Set the correct WLAN country when prompted. On Raspberry Pi OS releases using NetworkManager, `nmcli device status` shows device state and `nmcli -f IN-USE,SSID dev wifi` lists visible networks. Do not paste passwords into source code, shell history, or this README.
-
-To join a normal network, configure its SSID and password in Raspberry Pi OS, ensure the access point offers 2.4 GHz Wi-Fi, then verify association with `iwgetid -r` or `ip link show wlan0`. Verify internet separately, for example with `curl -I --max-time 5 https://api.groq.com`; a Wi-Fi association does not guarantee internet access. Captive portals, firewalls, DNS failures, or blocked outbound connections can prevent Groq access.
-
-### OnePlus 9 Pro hotspot
-
-In the phone's Personal Hotspot settings, enable the hotspot and select the 2.4 GHz band (the Pi Zero W supports 2.4 GHz Wi-Fi). Choose a hotspot name and password on the phone, then add that network through Raspberry Pi OS's Wi-Fi configuration as above. Keep the hotspot password in the operating system's protected network settings, not in application source or logs. Menu names can vary by OxygenOS version.
-
-If offline, check the Pi's Wi-Fi association first, then confirm internet access independently. For Groq failures, confirm the Pi's clock and internet access, verify that `.env` contains a valid `GROQ_API_KEY`, and check the configured Groq models/account availability. Authentication failures are not retried; transient errors receive only the configured bounded retries. Local eSpeak NG and the assistant's offline message do not require internet.
-
-Enable and configure I2S/ALSA for the microphone and amplifier before using real audio hardware. The PyAudio installation may require compiling against PortAudio on ARMv6; package availability and build success must be verified on the target OS. `requests` is only used by the optional generic HTTP helper; `sounddevice` was removed because no active module uses it. **Hardware has not been assembled or physically tested.** The Pi display driver is still a stub; this step does not implement the deferred SPI display.
-
-### Physical hardware validation checklist
-
-- [ ] Confirm Raspberry Pi OS version, Python version, and successful installation of all required packages on the Pi Zero W.
-- [ ] Enable I2S and verify ALSA enumerates the INMP441 input and MAX98357A output.
-- [ ] Confirm microphone channel count, sample rate, PCM format, and sustained capture without overflows.
-- [ ] Verify push-to-talk GPIO pin mapping, pull-up wiring, press/release callbacks, and debounce across repeated presses.
-- [ ] Confirm captured WAV files are valid and removed after both successful and failed interactions.
-- [ ] Verify eSpeak NG is installed, produces a WAV, and does not play audio directly a second time.
-- [ ] Verify MAX98357A playback, volume, clipping/noise, interruption, and cleanup after playback errors.
-- [ ] Test Wi-Fi and internet diagnostics separately on a normal 2.4 GHz network and the OnePlus 9 Pro hotspot.
-- [ ] Test offline start, internet loss during a request, reconnection on a later press, and Groq authentication/rate-limit failures.
-- [ ] Confirm optional display failure does not stop audio, and check shutdown during capture, processing, and playback.
-- [ ] Measure peak RAM, CPU, and SD-card log growth during repeated interactions and a long push-to-talk hold.
-
-Only after these checks should hardware support be considered validated; Windows and mocks cannot substitute for them.
+No Raspberry Pi software install, ARMv6 build, or physical hardware test has
+been performed from this Windows workspace. The current I2S drivers do not
+specify a pin/overlay mapping, so do not connect them based on an assumed map.
+The only source-defined hardware pin is the active-low push-to-talk button on
+BCM GPIO17 (physical pin 11).
 
 ---
 

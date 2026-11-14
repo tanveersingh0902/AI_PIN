@@ -536,6 +536,62 @@ def test_main_starts_with_windows_simulation_without_api_requests(monkeypatch):
     assert isinstance(captured["network_manager"], StubNetworkManager)
 
 
+def test_main_passes_pi_simulation_mode_to_hardware_factory(monkeypatch):
+    from dataclasses import replace
+
+    import main as main_module
+
+    monkeypatch.setattr(main_module, "setup_logging", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        main_module, "detect_platform", lambda: Platform.RASPBERRY_PI
+    )
+    monkeypatch.setattr(
+        main_module.signal, "signal", lambda *args: args[-1] if args else None
+    )
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        replace(
+            main_module.settings,
+            GROQ_API_KEY="mock-key",
+            HARDWARE_MODE="simulation",
+        ),
+    )
+
+    class StubNetworkManager:
+        def __init__(self, **_kwargs):
+            pass
+
+        def diagnostics(self):
+            return "mock network status"
+
+    class StubAssistant:
+        def __init__(self, hardware, **_kwargs):
+            self.hardware = hardware
+
+        def run(self):
+            return True
+
+        def shutdown(self):
+            self.hardware.cleanup()
+
+    monkeypatch.setattr(main_module, "NetworkManager", StubNetworkManager)
+    monkeypatch.setattr(main_module, "AssistantController", StubAssistant)
+    original_create = main_module.HardwareFactory.create
+    captured = {}
+
+    def create_hardware(**kwargs):
+        captured["hardware_mode"] = kwargs["hardware_mode"]
+        return original_create(**kwargs)
+
+    monkeypatch.setattr(
+        main_module.HardwareFactory, "create", staticmethod(create_hardware)
+    )
+
+    assert main_module.main() == 0
+    assert captured["hardware_mode"] == "simulation"
+
+
 def test_main_missing_api_key_exits_before_network_or_hardware(monkeypatch):
     from dataclasses import replace
 
