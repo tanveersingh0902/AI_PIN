@@ -1,0 +1,40 @@
+# ═══════════════════════════════════════════════════════════════
+#  VIHAAN AI PIN — Python Dependencies
+# ═══════════════════════════════════════════════════════════════
+#  Install:  pip install -r requirements.txt
+#
+#  Libraries are chosen to be LIGHTWEIGHT and compatible with
+#  Raspberry Pi Zero W (ARMv6, 512 MB RAM, Raspbian 32-bit).
+# ═══════════════════════════════════════════════════════════════
+
+# ── Core ──────────────────────────────────────────────────────
+python-dotenv>=1.0.0          # .env file loading
+
+# ── AI / LLM (cloud-based to save Pi RAM) ────────────────────
+google-genai>=1.0.0           # Gemini API (lightweight SDK)
+# openai>=1.0.0               # Uncomment if using OpenAI
+
+# ── Speech ────────────────────────────────────────────────────
+SpeechRecognition>=3.10.0     # STT — wraps Google / Vosk / etc.
+pyttsx3>=2.90                 # TTS — offline, lightweight
+# vosk>=0.3.45                # Uncomment for offline STT on Pi
+
+# ── Audio ─────────────────────────────────────────────────────
+PyAudio>=0.2.13               # Microphone / speaker I/O
+sounddevice>=0.4.6            # Alternative audio backend
+
+# ── Networking ────────────────────────────────────────────────
+requests>=2.31.0              # HTTP client (lightweight)
+
+# ── Utilities ─────────────────────────────────────────────────
+# (none yet — add as needed)
+
+# ── Testing ───────────────────────────────────────────────────
+pytest>=7.4.0                 # Unit testing
+
+# ═══════════════════════════════════════════════════════════════
+#  HARDWARE-ONLY  (install ONLY on Raspberry Pi)
+# ═══════════════════════════════════════════════════════════════
+# RPi.GPIO>=0.7.1
+# gpiozero>=2.0
+# spidev>=3.6
