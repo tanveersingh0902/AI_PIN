@@ -13,4 +13,6 @@ Modules
 - sim_speaker.py : Simulated speaker (plays via Windows audio)
 - sim_button.py  : Simulated button (keyboard key press)
 - sim_led.py     : Simulated LED (console / terminal output)
+- sim_display.py : Simulated display (console text output)
+- sim_camera.py  : Simulated camera (webcam or static test image)
 """

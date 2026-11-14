@@ -17,4 +17,6 @@ Modules
 - button.py   : Physical push-button via GPIO
 - led.py      : Status LED(s) via GPIO
 - battery.py  : Battery voltage reading via ADC (SPI)
+- display.py  : OLED / e-ink display (I2C / SPI)
+- camera.py   : Camera module (CSI / USB)
 """
